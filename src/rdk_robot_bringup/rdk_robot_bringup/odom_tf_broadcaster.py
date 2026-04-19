@@ -13,27 +13,34 @@ class OdomTFBroadcaster(Node):
             self.odom_callback,
             10)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
-        self.get_logger().info("Odom TF Broadcaster node has started.")
+        
+        # 初始化里程计数据，确保四元数 W=1.0 是合法的单位旋转
+        self.last_odom_msg = Odometry()
+        self.last_odom_msg.pose.pose.orientation.w = 1.0
+        
+        # 提高发布频率到 50Hz，确保时间轴连续，解决 Message Filter 延迟
+        self.timer = self.create_timer(0.02, self.publish_tf)
+        self.get_logger().info("Odom TF Broadcaster started at 50Hz with valid quaternion.")
 
     def odom_callback(self, msg):
-        t = TransformStamped()
+        # 检查收到的消息是否包含合法的四元数
+        if abs(msg.pose.pose.orientation.x**2 + msg.pose.pose.orientation.y**2 + 
+               msg.pose.pose.orientation.z**2 + msg.pose.pose.orientation.w**2 - 1.0) < 0.1:
+            self.last_odom_msg = msg
 
-        # 使用上位机当前时间，解决时间同步问题
+    def publish_tf(self):
+        t = TransformStamped()
+        
+        # 使用当前时间戳，确保它是 TF 缓存中最新的
         t.header.stamp = self.get_clock().now().to_msg()
-        # 设置父坐标系
         t.header.frame_id = 'odom'
-        # 设置子坐标系 (Robot footprint)
         t.child_frame_id = 'base_footprint'
 
-        # 从 odom 话题中提取位置 (Translation)
-        t.transform.translation.x = msg.pose.pose.position.x
-        t.transform.translation.y = msg.pose.pose.position.y
-        t.transform.translation.z = msg.pose.pose.position.z
+        t.transform.translation.x = self.last_odom_msg.pose.pose.position.x
+        t.transform.translation.y = self.last_odom_msg.pose.pose.position.y
+        t.transform.translation.z = self.last_odom_msg.pose.pose.position.z
+        t.transform.rotation = self.last_odom_msg.pose.pose.orientation
 
-        # 从 odom 话题中提取姿态 (Rotation / Quaternion)
-        t.transform.rotation = msg.pose.pose.orientation
-
-        # 发布 TF
         self.tf_broadcaster.sendTransform(t)
 
 def main(args=None):

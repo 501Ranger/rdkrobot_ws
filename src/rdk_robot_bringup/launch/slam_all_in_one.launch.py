@@ -5,10 +5,10 @@ from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 def generate_launch_description():
-    # 1. 机器人基础和 RViz
+    # 1. 机器人基础节点，不在板卡上启动 RViz
     bringup_launch_dir = os.path.join(get_package_share_directory('rdk_robot_bringup'), 'launch')
     bringup_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(bringup_launch_dir, 'bringup_rviz.launch.py'))
+        PythonLaunchDescriptionSource(os.path.join(bringup_launch_dir, 'bringup_base.launch.py'))
     )
 
     # 2. 激光雷达

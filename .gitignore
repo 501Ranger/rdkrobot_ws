@@ -33,3 +33,4 @@ install_manifest.txt
 *.swp
 *~
 .DS_Store
+.codex

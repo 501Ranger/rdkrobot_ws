@@ -16,7 +16,7 @@
     use_system_default_stamp: true
     scan_topic: /scan
     interface_selection: serial
-    serial_port_: /dev/ttyACM0
+    serial_port_: /dev/ttyUSB0
     high_reflection: false
     compensation: false
     pubScan: true

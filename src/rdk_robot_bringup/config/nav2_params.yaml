@@ -78,18 +78,18 @@ controller_server:
       debug_trajectory_details: False
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 0.22
+      max_vel_x: 0.28
       max_vel_y: 0.0
-      max_vel_theta: 0.8
-      min_speed_xy: 0.03
-      max_speed_xy: 0.22
-      min_speed_theta: 0.1
-      acc_lim_x: 0.3
+      max_vel_theta: 1.2
+      min_speed_xy: 0.08
+      max_speed_xy: 0.28
+      min_speed_theta: 0.35
+      acc_lim_x: 0.45
       acc_lim_y: 0.0
-      acc_lim_theta: 0.8
-      decel_lim_x: -0.3
+      acc_lim_theta: 1.2
+      decel_lim_x: -0.45
       decel_lim_y: 0.0
-      decel_lim_theta: -0.8
+      decel_lim_theta: -1.2
       vx_samples: 15
       vy_samples: 1
       vtheta_samples: 20
@@ -109,8 +109,8 @@ controller_server:
       GoalAlign.forward_point_distance: 0.25
       PathDist.scale: 20.0
       GoalDist.scale: 16.0
-      RotateToGoal.scale: 8.0
-      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.scale: 12.0
+      RotateToGoal.slowing_factor: 3.0
       RotateToGoal.lookahead_time: -1.0
       PreferForward.scale: 1.0
       
@@ -244,9 +244,9 @@ behavior_server:
     transform_tolerance: 0.3
     use_sim_time: False
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.8
-    min_rotational_vel: 0.15
-    rotational_acc_lim: 0.8
+    max_rotational_vel: 1.2
+    min_rotational_vel: 0.35
+    rotational_acc_lim: 1.2
 
 waypoint_follower:
   ros__parameters:
@@ -264,11 +264,11 @@ velocity_smoother:
     smoothing_frequency: 10.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.22, 0.0, 0.8]
-    min_velocity: [0.0, 0.0, -0.8]
-    max_accel: [0.3, 0.0, 0.8]
-    max_decel: [-0.3, 0.0, -0.8]
+    max_velocity: [0.28, 0.0, 1.2]
+    min_velocity: [0.0, 0.0, -1.2]
+    max_accel: [0.45, 0.0, 1.2]
+    max_decel: [-0.45, 0.0, -1.2]
+    deadband_velocity: [0.08, 0.0, 0.2]
     odom_topic: "odom"
     odom_duration: 0.1
-    deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0

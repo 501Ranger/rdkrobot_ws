@@ -31,6 +31,8 @@
 #include "lslidar_driver/lslidar_driver.h"
 #include <functional>
 
+extern volatile sig_atomic_t flag;
+
 int truncated_mode_=0;          //多角度屏蔽开关：默认为0，如果需要屏蔽多个角度，则truncated_mode_赋值为1。
 
 int scan_crop_min[]={0,180}; 	//雷达屏蔽角度，这里屏蔽角度为135°到225°，
@@ -44,8 +46,8 @@ namespace lslidar_driver
 
 	static void my_hander(int sig)
 	{
-		printf("sig: %d", sig);
-		abort();
+		(void)sig;
+		flag = 0;
 	}
 	LslidarDriver::LslidarDriver() : LslidarDriver(rclcpp::NodeOptions()) {}
 	LslidarDriver::LslidarDriver(const rclcpp::NodeOptions &options) : Node("lslidar_driver_node", options), diagnostics(this)
@@ -978,8 +980,7 @@ namespace lslidar_driver
 				if (pubScan)
 				{
 					auto scan = sensor_msgs::msg::LaserScan::UniquePtr(new sensor_msgs::msg::LaserScan());
-					////int scan_num = count_num * 2;
-					int scan_num = count_num ;
+					int scan_num = count_num;
 
 					std::vector<ScanPoint> points;
 					rclcpp::Time start_time;
@@ -992,12 +993,12 @@ namespace lslidar_driver
 					}
 					else
 					{
-						scan->header.stamp = this->now(); // timestamp will obtained from sweep data stamp
+						scan->header.stamp = start_time;
 					}
 
 					scan->angle_min = 0;
-					scan->angle_max = 2 * M_PI;
-					scan->angle_increment = 2 * M_PI / (double)(count_num);
+					scan->angle_increment = 2 * M_PI / static_cast<double>(scan_num);
+					scan->angle_max = scan->angle_min + scan->angle_increment * static_cast<double>(scan_num - 1);
 					scan->range_min = min_range;
 					scan->range_max = max_range;
 					scan->ranges.reserve(scan_num);
@@ -1015,7 +1016,11 @@ namespace lslidar_driver
 
 					for (int i = 0; i < count_num; i++)
 					{
-						int point_idx = round((360 - points[i].degree) * count_num / 360);
+						int point_idx = static_cast<int>(floor((360.0 - points[i].degree) * count_num / 360.0));
+						if (point_idx >= count_num)
+							point_idx = 0;
+						if (point_idx < 0)
+							continue;
 						if (points[i].range == 0.0)
 						{
 							scan->ranges[point_idx] = std::numeric_limits<float>::infinity();
@@ -1128,7 +1133,9 @@ namespace lslidar_driver
 				if (pubScan)
 				{
 					auto scan = sensor_msgs::msg::LaserScan::UniquePtr(new sensor_msgs::msg::LaserScan());
-					int scan_num = ceil((angle_able_max - angle_able_min) / 360 * count_num) + 1;
+					int start_num = floor(angle_able_min * count_num / 360);
+					int end_num = floor(angle_able_max * count_num / 360);
+					int scan_num = end_num - start_num + 1;
 
 					std::vector<ScanPoint> points;
 					rclcpp::Time start_time;
@@ -1141,20 +1148,19 @@ namespace lslidar_driver
 					}
 					else
 					{
-						scan->header.stamp = this->now(); // timestamp will obtained from sweep data stamp
+						scan->header.stamp = start_time;
 					}
 
 					if (angle_able_max > 360)
 					{
 						scan->angle_min = 2 * M_PI * (angle_able_min - 360) / 360;
-						scan->angle_max = 2 * M_PI * (angle_able_max - 360) / 360;
 					}
 					else
 					{
 						scan->angle_min = 2 * M_PI * angle_able_min / 360;
-						scan->angle_max = 2 * M_PI * angle_able_max / 360;
 					}
-					scan->angle_increment = 2 * M_PI / (double)(count_num - 1);
+					scan->angle_increment = 2 * M_PI / static_cast<double>(count_num);
+					scan->angle_max = scan->angle_min + scan->angle_increment * static_cast<double>(scan_num - 1);
 
 					scan->range_min = min_range;
 					scan->range_max = max_range;
@@ -1163,14 +1169,13 @@ namespace lslidar_driver
 					scan->intensities.reserve(scan_num);
 					scan->intensities.assign(scan_num, std::numeric_limits<float>::infinity());
 					scan->scan_time = scan_time;
-					scan->time_increment = scan_time / (double)(count_num - 1);
-
-					int start_num = floor(angle_able_min * count_num / 360);
-					int end_num = floor(angle_able_max * count_num / 360);
+					scan->time_increment = scan_time / static_cast<double>(count_num);
 
 					for (int i = 0; i < count_num; i++)
 					{
-						int point_idx = round((360 - points[i].degree) * count_num / 360);
+						int point_idx = static_cast<int>(floor((360.0 - points[i].degree) * count_num / 360.0));
+						if (point_idx >= count_num)
+							point_idx = 0;
 						if (point_idx < (end_num - count_num))
 							point_idx += count_num;
 						point_idx = point_idx - start_num;

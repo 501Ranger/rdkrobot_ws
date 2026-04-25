@@ -1,6 +1,7 @@
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.actions import SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -15,6 +16,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable('OMP_NUM_THREADS', '4'),
+        SetEnvironmentVariable('OPENBLAS_NUM_THREADS', '1'),
+        SetEnvironmentVariable('MKL_NUM_THREADS', '1'),
         DeclareLaunchArgument(
             'use_sim_time',
             default_value='false',
@@ -29,6 +33,7 @@ def generate_launch_description():
             package='slam_toolbox',
             executable='async_slam_toolbox_node',
             name='slam_toolbox',
-            output='screen'
+            output='screen',
+            arguments=['--ros-args', '--log-level', 'warn']
         )
     ])

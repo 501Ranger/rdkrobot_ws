@@ -34,9 +34,9 @@ bt_navigator:
   ros__parameters:
     use_sim_time: False
     global_frame: map
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     odom_topic: /odom
-    bt_loop_duration: 10
+    bt_loop_duration: 100
     default_server_timeout: 20
     navigators: ['navigate_to_pose', 'navigate_through_poses']
     navigate_to_pose:
@@ -54,7 +54,7 @@ bt_navigator_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False
-    controller_frequency: 5.0
+    controller_frequency: 3.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
@@ -62,6 +62,7 @@ controller_server:
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker"] 
     controller_plugins: ["FollowPath"]
+    current_goal_checker: "general_goal_checker"
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -91,7 +92,7 @@ controller_server:
       decel_lim_theta: -1.2
       vx_samples: 10
       vy_samples: 1
-      vtheta_samples: 16
+      vtheta_samples: 12
       sim_time: 1.2
       linear_granularity: 0.05
       angular_granularity: 0.05
@@ -120,10 +121,10 @@ controller_server_rclcpp_node:
 local_costmap:
   local_costmap:
     ros__parameters:
-      update_frequency: 4.0
-      publish_frequency: 2.0
+      update_frequency: 3.0
+      publish_frequency: 1.0
       global_frame: odom
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: False
       rolling_window: true
       width: 3
@@ -148,9 +149,9 @@ local_costmap:
           marking: True
           data_type: "LaserScan"
           raytrace_max_range: 3.0
-          raytrace_min_range: 0.0
+          raytrace_min_range: 0.2
           obstacle_max_range: 2.5
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.2
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -168,7 +169,7 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: False
       robot_radius: 0.15
       resolution: 0.05
@@ -186,9 +187,9 @@ global_costmap:
           marking: True
           data_type: "LaserScan"
           raytrace_max_range: 3.0
-          raytrace_min_range: 0.0
+          raytrace_min_range: 0.2
           obstacle_max_range: 2.5
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.2
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -211,7 +212,7 @@ map_server:
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 4.0
+    expected_planner_frequency: 2.0
     use_sim_time: False
     planner_plugins: ["GridBased"]
     GridBased:
@@ -228,7 +229,7 @@ behavior_server:
   ros__parameters:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
-    cycle_frequency: 5.0
+    cycle_frequency: 3.0
     behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
     spin:
       plugin: "nav2_behaviors/Spin"
@@ -239,7 +240,7 @@ behavior_server:
     wait:
       plugin: "nav2_behaviors/Wait"
     global_frame: odom
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     transform_tolerance: 0.3
     use_sim_time: False
     simulate_ahead_time: 2.0
@@ -260,7 +261,7 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: False
-    smoothing_frequency: 10.0
+    smoothing_frequency: 5.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [0.4, 0.0, 1.5]

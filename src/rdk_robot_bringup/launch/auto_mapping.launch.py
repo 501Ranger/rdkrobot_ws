@@ -1,7 +1,7 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -46,8 +46,8 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(bringup_cmd)
     ld.add_action(lidar_cmd)
-    ld.add_action(slam_cmd)
-    ld.add_action(nav2_cmd)
-    ld.add_action(explore_cmd)
+    ld.add_action(TimerAction(period=2.0, actions=[slam_cmd]))
+    ld.add_action(TimerAction(period=6.0, actions=[nav2_cmd]))
+    ld.add_action(TimerAction(period=9.0, actions=[explore_cmd]))
 
     return ld

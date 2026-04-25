@@ -14,6 +14,7 @@ def generate_launch_description():
                                 output='screen',
                                 emulate_tty=True,
                                 parameters=[driver_dir],
+                                arguments=['--ros-args', '--log-level', 'warn'],
                                 )
 
     return LaunchDescription([

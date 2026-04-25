@@ -22,12 +22,13 @@ slam_toolbox:
     scan_queue_size: 20
     transform_publish_period: 0.1
     map_update_interval: 2.0
+    map_start_at_dock: true
     resolution: 0.05
     min_laser_range: 0.2
     max_laser_range: 20.0
     minimum_time_interval: 0.1
-    transform_timeout: 0.5
-    tf_buffer_duration: 30.
+    transform_timeout: 1.0
+    tf_buffer_duration: 60.
     stack_capacity: 40000000
     enable_interactive_mode: false
 

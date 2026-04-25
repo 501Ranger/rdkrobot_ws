@@ -102,6 +102,7 @@ private:
     int link_time = 0;
 
     bool use_gps_ts;   
+    bool use_system_default_stamp;
     bool is_start;
     bool high_reflection;
     bool compensation;

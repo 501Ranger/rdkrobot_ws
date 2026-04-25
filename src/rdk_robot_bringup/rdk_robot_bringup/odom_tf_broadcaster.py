@@ -11,10 +11,14 @@ class OdomTFBroadcaster(Node):
         self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('odom_frame_id', 'odom')
         self.declare_parameter('child_frame_id', 'base_footprint')
+        self.declare_parameter('use_odom_msg_stamp', False)
 
         self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         self.odom_frame_id = self.get_parameter('odom_frame_id').get_parameter_value().string_value
         self.child_frame_id = self.get_parameter('child_frame_id').get_parameter_value().string_value
+        self.use_odom_msg_stamp = self.get_parameter(
+            'use_odom_msg_stamp'
+        ).get_parameter_value().bool_value
 
         self.subscription = self.create_subscription(
             Odometry,
@@ -41,7 +45,10 @@ class OdomTFBroadcaster(Node):
             return
 
         t = TransformStamped()
-        t.header.stamp = msg.header.stamp
+        if self.use_odom_msg_stamp:
+            t.header.stamp = msg.header.stamp
+        else:
+            t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = self.odom_frame_id
         t.child_frame_id = self.child_frame_id
 

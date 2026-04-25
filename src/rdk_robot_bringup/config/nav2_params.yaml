@@ -121,7 +121,7 @@ controller_server_rclcpp_node:
 local_costmap:
   local_costmap:
     ros__parameters:
-      update_frequency: 3.0
+      update_frequency: 2.0
       publish_frequency: 1.0
       global_frame: odom
       robot_base_frame: base_footprint
@@ -131,7 +131,7 @@ local_costmap:
       height: 3
       resolution: 0.05
       robot_radius: 0.15
-      transform_tolerance: 0.3
+      transform_tolerance: 1.0
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -166,14 +166,14 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 1.0
-      publish_frequency: 1.0
+      update_frequency: 0.5
+      publish_frequency: 0.5
       global_frame: map
       robot_base_frame: base_footprint
       use_sim_time: False
       robot_radius: 0.15
       resolution: 0.05
-      transform_tolerance: 0.3
+      transform_tolerance: 1.0
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       obstacle_layer:
@@ -212,7 +212,7 @@ map_server:
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 2.0
+    expected_planner_frequency: 1.0
     use_sim_time: False
     planner_plugins: ["GridBased"]
     GridBased:

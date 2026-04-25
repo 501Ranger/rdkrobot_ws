@@ -20,7 +20,10 @@ def generate_launch_description():
         package=package_name,
         executable='odom_tf_broadcaster',
         name='odom_tf_broadcaster',
-        parameters=[{'child_frame_id': 'base_footprint'}],
+        parameters=[{
+            'child_frame_id': 'base_footprint',
+            'use_odom_msg_stamp': False,
+        }],
     )
 
     robot_state_publisher_node = Node(

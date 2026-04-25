@@ -77,6 +77,7 @@ namespace lslidar_driver
 		min_range = 0.3;
 		max_range = 100.0;
 		use_gps_ts = true;
+		use_system_default_stamp = true;
 		compensation = true;
 		pubScan = true;
 		pubPointCloud2 = true;
@@ -90,6 +91,7 @@ namespace lslidar_driver
 		this->declare_parameter<double>("min_range", 0.3);
 		this->declare_parameter<double>("max_range", 100.0);
 		this->declare_parameter<bool>("use_gps_ts", false);
+		this->declare_parameter<bool>("use_system_default_stamp", true);
 		this->declare_parameter<bool>("high_reflection", false);
 		this->declare_parameter<bool>("compensation", false);
 		this->declare_parameter<bool>("pubScan", true);
@@ -105,6 +107,7 @@ namespace lslidar_driver
 		this->get_parameter("min_range", min_range);
 		this->get_parameter("max_range", max_range);
 		this->get_parameter("use_gps_ts", use_gps_ts);
+		this->get_parameter("use_system_default_stamp", use_system_default_stamp);
 		this->get_parameter("compensation", compensation);
 		this->get_parameter("pointcloud_topic", pointcloud_topic);
 		this->get_parameter("pubScan", pubScan);
@@ -991,6 +994,10 @@ namespace lslidar_driver
 					{
 						scan->header.stamp = rclcpp::Time(sweep_end_time_gps, sweep_end_time_hardware);
 					}
+					else if (use_system_default_stamp)
+					{
+						scan->header.stamp = this->get_clock()->now();
+					}
 					else
 					{
 						scan->header.stamp = start_time;
@@ -1145,6 +1152,10 @@ namespace lslidar_driver
 					if (use_gps_ts)
 					{
 						scan->header.stamp = rclcpp::Time(sweep_end_time_gps, sweep_end_time_hardware);
+					}
+					else if (use_system_default_stamp)
+					{
+						scan->header.stamp = this->get_clock()->now();
 					}
 					else
 					{

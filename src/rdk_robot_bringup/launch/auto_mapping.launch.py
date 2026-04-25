@@ -46,8 +46,8 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(bringup_cmd)
     ld.add_action(lidar_cmd)
-    ld.add_action(TimerAction(period=2.0, actions=[slam_cmd]))
-    ld.add_action(TimerAction(period=6.0, actions=[nav2_cmd]))
-    ld.add_action(TimerAction(period=9.0, actions=[explore_cmd]))
+    ld.add_action(TimerAction(period=3.0, actions=[slam_cmd]))
+    ld.add_action(TimerAction(period=10.0, actions=[nav2_cmd]))
+    ld.add_action(TimerAction(period=16.0, actions=[explore_cmd]))
 
     return ld

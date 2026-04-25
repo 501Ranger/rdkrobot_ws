@@ -23,6 +23,7 @@ def generate_launch_description():
         parameters=[{
             'child_frame_id': 'base_footprint',
             'use_odom_msg_stamp': False,
+            'zero_at_startup': True,
         }],
     )
 

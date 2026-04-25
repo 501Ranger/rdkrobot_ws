@@ -4,44 +4,54 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
 import tf2_ros
 
+
 class OdomTFBroadcaster(Node):
     def __init__(self):
         super().__init__('odom_tf_broadcaster')
+        self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('odom_frame_id', 'odom')
+        self.declare_parameter('child_frame_id', 'base_footprint')
+
+        self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
+        self.odom_frame_id = self.get_parameter('odom_frame_id').get_parameter_value().string_value
+        self.child_frame_id = self.get_parameter('child_frame_id').get_parameter_value().string_value
+
         self.subscription = self.create_subscription(
             Odometry,
-            '/odom',
+            self.odom_topic,
             self.odom_callback,
-            10)
+            50)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
-        
-        # 初始化里程计数据，确保四元数 W=1.0 是合法的单位旋转
-        self.last_odom_msg = Odometry()
-        self.last_odom_msg.pose.pose.orientation.w = 1.0
-        
-        # 提高发布频率到 50Hz，确保时间轴连续，解决 Message Filter 延迟
-        self.timer = self.create_timer(0.02, self.publish_tf)
-        self.get_logger().info("Odom TF Broadcaster started at 50Hz with valid quaternion.")
+        self.get_logger().info(
+            f"Odom TF Broadcaster relaying {self.odom_frame_id} -> {self.child_frame_id} from {self.odom_topic}"
+        )
 
     def odom_callback(self, msg):
-        # 检查收到的消息是否包含合法的四元数
-        if abs(msg.pose.pose.orientation.x**2 + msg.pose.pose.orientation.y**2 + 
-               msg.pose.pose.orientation.z**2 + msg.pose.pose.orientation.w**2 - 1.0) < 0.1:
-            self.last_odom_msg = msg
+        norm = (
+            msg.pose.pose.orientation.x ** 2
+            + msg.pose.pose.orientation.y ** 2
+            + msg.pose.pose.orientation.z ** 2
+            + msg.pose.pose.orientation.w ** 2
+        )
+        if abs(norm - 1.0) >= 0.1:
+            self.get_logger().warn(
+                'Ignoring odom message with invalid quaternion',
+                throttle_duration_sec=2.0,
+            )
+            return
 
-    def publish_tf(self):
         t = TransformStamped()
-        
-        # 使用当前时间戳，确保它是 TF 缓存中最新的
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_footprint'
+        t.header.stamp = msg.header.stamp
+        t.header.frame_id = self.odom_frame_id
+        t.child_frame_id = self.child_frame_id
 
-        t.transform.translation.x = self.last_odom_msg.pose.pose.position.x
-        t.transform.translation.y = self.last_odom_msg.pose.pose.position.y
-        t.transform.translation.z = self.last_odom_msg.pose.pose.position.z
-        t.transform.rotation = self.last_odom_msg.pose.pose.orientation
+        t.transform.translation.x = msg.pose.pose.position.x
+        t.transform.translation.y = msg.pose.pose.position.y
+        t.transform.translation.z = msg.pose.pose.position.z
+        t.transform.rotation = msg.pose.pose.orientation
 
         self.tf_broadcaster.sendTransform(t)
+
 
 def main(args=None):
     rclpy.init(args=args)

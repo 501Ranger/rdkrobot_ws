@@ -34,7 +34,7 @@ def generate_launch_description():
         default_value=os.path.join(
             get_package_share_directory('rdk_robot_bringup'),
             'config',
-            'nav2_params_sim.yaml',
+            'nav2_params.yaml',
         ),
         description='Nav2 parameter file',
     )

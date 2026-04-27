@@ -30,7 +30,7 @@ def generate_launch_description():
     )
     declare_nav2_params = DeclareLaunchArgument(
         'nav2_params_file',
-        default_value=os.path.join(pkg_share, 'config', 'nav2_params_sim.yaml'),
+        default_value=os.path.join(pkg_share, 'config', 'nav2_params.yaml'),
         description='Nav2 parameter file',
     )
     declare_explore_params = DeclareLaunchArgument(

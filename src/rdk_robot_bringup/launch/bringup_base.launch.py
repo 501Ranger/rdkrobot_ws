@@ -33,7 +33,7 @@ def generate_launch_description():
         condition=UnlessCondition(use_sim_time),
         parameters=[{
             'child_frame_id': 'base_footprint',
-            'use_odom_msg_stamp': True,
+            'use_odom_msg_stamp': False,
             'zero_at_startup': True,
             'use_sim_time': use_sim_time,
         }],

@@ -1,6 +1,6 @@
 # RDK Robot ROS 2 Workspace
 
-这是一个基于 ROS 2 的建图与导航上位机工程，集成了雷达驱动、自主探索建图以及 Nav2 导航堆栈。
+这是一个基于 ROS 2 的建图与导航上位机工程，集成了雷达驱动、自主探索建图以及 Nav2 导航堆栈，运行在RDK X5板卡上面。
 
 ## 项目结构
 - `src/rdk_robot_bringup`: 核心启动包，包含 URDF 模型、Launch 脚本和配置文件（Nav2, Slam Toolbox）。

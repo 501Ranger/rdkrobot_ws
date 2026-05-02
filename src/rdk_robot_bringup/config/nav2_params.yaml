@@ -276,3 +276,10 @@ velocity_smoother:
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0
+
+# lifecycle_manager 在资源受限的 RDK X5 上需要更长的 bond 超时
+lifecycle_manager_navigation:
+  ros__parameters:
+    bond_timeout: 10.0
+    bond_respawn_max_duration: 10.0
+    attempt_respawn_reconnection: true

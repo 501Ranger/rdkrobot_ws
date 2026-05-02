@@ -5,7 +5,7 @@ slam_nav.launch.py — 真实机器人：SLAM 建图 + Nav2 导航
   T=0s   bringup_base（robot_state_publisher / joint_state_publisher / odom_tf_broadcaster）
   T=0s   lslidar N10P 雷达驱动
   T=3s   SLAM Toolbox（等待 TF 链就绪）
-  T=10s  Nav2 导航栈（等待地图初始化）
+  T=15s  Nav2 导航栈（等待 SLAM 发布稳定的 map->odom TF）
 
 使用前请先在另一终端启动 micro-ROS agent：
   ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0
@@ -54,5 +54,5 @@ def generate_launch_description():
     ld.add_action(bringup_cmd)
     ld.add_action(lidar_cmd)
     ld.add_action(TimerAction(period=3.0, actions=[slam_cmd]))
-    ld.add_action(TimerAction(period=10.0, actions=[nav2_cmd]))
+    ld.add_action(TimerAction(period=15.0, actions=[nav2_cmd]))
     return ld

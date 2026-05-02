@@ -12,6 +12,14 @@
   <depend>tf2_ros</depend>
   <depend>geometry_msgs</depend>
 
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>explore_lite</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>lslidar_driver</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

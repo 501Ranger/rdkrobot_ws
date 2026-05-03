@@ -14,8 +14,8 @@ class OdomTFBroadcaster(Node):
             10)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self._last_tf = None
-        # 以 50Hz 重发最新 TF，防止 ESP32 串口延迟导致 TF 缓冲出现空洞
-        self.create_timer(0.02, self._republish_timer)
+        # 以 20Hz 重发最新 TF，防止 ESP32 串口延迟导致 TF 缓冲出现空洞
+        self.create_timer(0.05, self._republish_timer)
         self.get_logger().info("Odom TF Broadcaster node has started.")
 
     def odom_callback(self, msg):

@@ -34,3 +34,6 @@ install_manifest.txt
 *~
 .DS_Store
 .codex
+
+#Chen
+.vscode/sftp.json

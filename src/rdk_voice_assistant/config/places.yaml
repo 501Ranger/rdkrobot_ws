@@ -1,0 +1,29 @@
+# Replace these demo coordinates after SLAM mapping is finished.
+places:
+  home:
+    name: 起点
+    aliases: [原点, 家, 充电桩]
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+
+  living_room:
+    name: 客厅
+    aliases: [大厅]
+    x: 1.0
+    y: 0.0
+    yaw: 0.0
+
+  bedroom:
+    name: 卧室
+    aliases: [房间]
+    x: 0.0
+    y: 1.0
+    yaw: 1.57
+
+  door:
+    name: 门口
+    aliases: [大门, 玄关]
+    x: -1.0
+    y: 0.0
+    yaw: 3.14

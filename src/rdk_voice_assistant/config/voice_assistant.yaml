@@ -1,0 +1,10 @@
+voice_assistant_node:
+  ros__parameters:
+    command_text_topic: /voice/command_text
+    intent_topic: /voice/intent
+    reply_text_topic: /assistant/reply_text
+    robot_task_topic: /voice/robot_task
+    safety_command_topic: /voice/safety_command
+    navigate_action_name: /navigate_to_pose
+    enable_navigation: false
+    map_frame: map

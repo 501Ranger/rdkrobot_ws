@@ -1,0 +1,20 @@
+rdk_asr_bridge_node:
+  ros__parameters:
+    official_asr_text_topic: /asr_text
+    command_text_topic: /voice/command_text
+    partial_text_topic: /voice/partial_text
+    publish_partial: false
+    json_text_key: ''
+    require_wake_word: false
+    wake_words: 小智,小智小智,机器人
+    remove_wake_word: true
+    drop_empty: true
+
+rdk_tts_bridge_node:
+  ros__parameters:
+    reply_text_topic: /assistant/reply_text
+    official_tts_text_topic: /tts_text
+    prefix: ''
+    suffix: ''
+    max_text_length: 120
+    drop_empty: true

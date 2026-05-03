@@ -1,0 +1,27 @@
+local_stt_node:
+  ros__parameters:
+    command_text_topic: /voice/command_text
+    partial_text_topic: /voice/partial_text
+    model_path: ''
+    sample_rate: 16000
+    block_size: 8000
+    device: ''
+    language: zh-cn
+    publish_partial: false
+    require_wake_word: false
+    wake_words: 小智,小智小智,机器人
+    remove_wake_word: true
+
+local_tts_node:
+  ros__parameters:
+    reply_text_topic: /assistant/reply_text
+    engine: pyttsx3
+    rate: 170
+    volume: 1.0
+    voice: ''
+    language: zh
+    espeak_executable: espeak-ng
+    piper_executable: piper
+    piper_model_path: ''
+    audio_player: aplay
+    print_text: true

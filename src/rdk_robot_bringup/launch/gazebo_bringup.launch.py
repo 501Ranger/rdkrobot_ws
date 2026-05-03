@@ -62,7 +62,7 @@ def generate_launch_description():
         arguments=[
             '-entity', 'rdk_robot',
             '-topic', 'robot_description',
-            '-x', '0.0', '-y', '0.0', '-z', '0.05',
+            '-x', '0.0', '-y', '0.0', '-z', '0.1',
         ],
         output='screen',
     )

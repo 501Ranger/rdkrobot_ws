@@ -8,7 +8,7 @@ local_stt_node:
     device: ''
     language: zh-cn
     publish_partial: false
-    require_wake_word: false
+    require_wake_word: true
     wake_words: 小智,小智小智,机器人
     remove_wake_word: true
 

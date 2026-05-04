@@ -32,7 +32,7 @@ class LlmDialogNode(Node):
         self.declare_parameter('history_turns', 4)
         self.declare_parameter(
             'system_prompt',
-            '你是家庭陪伴机器人 Ranger 的语音助手。'
+            '你是家庭陪伴机器人语音助手。'
             '用简短、自然、适合语音播报的中文回答。'
             '如果用户要求机器人移动、停止、巡查或查询状态，不要假装已经执行，'
             '只提醒用户可以使用明确的控制指令。',
@@ -55,6 +55,8 @@ class LlmDialogNode(Node):
         self.history: List[Dict[str, str]] = []
         self.lock = threading.Lock()
         self.busy = False
+        self.active_text = ''
+        self.request_seq = 0
 
         self.get_logger().info(
             'LLM dialog node ready. Listening for chat tasks on '
@@ -76,13 +78,29 @@ class LlmDialogNode(Node):
 
         with self.lock:
             if self.busy:
+                if text == self.active_text:
+                    self.get_logger().info(
+                        f'Ignore duplicate chat task while busy: {text}'
+                    )
+                    return
+                self.get_logger().info(
+                    f'Busy with chat task: {self.active_text}; rejected: {text}'
+                )
                 self._say(str(self.get_parameter('busy_reply').value))
                 return
             self.busy = True
+            self.active_text = text
+            self.request_seq += 1
+            request_id = self.request_seq
 
-        threading.Thread(target=self._reply_worker, args=(text,), daemon=True).start()
+        self.get_logger().info(f'Start LLM request #{request_id}: {text}')
+        threading.Thread(
+            target=self._reply_worker,
+            args=(request_id, text),
+            daemon=True,
+        ).start()
 
-    def _reply_worker(self, text: str) -> None:
+    def _reply_worker(self, request_id: int, text: str) -> None:
         try:
             reply = self._call_llm(text)
             if reply:
@@ -96,6 +114,8 @@ class LlmDialogNode(Node):
         finally:
             with self.lock:
                 self.busy = False
+                self.active_text = ''
+            self.get_logger().info(f'Finish LLM request #{request_id}: {text}')
 
     def _call_llm(self, text: str) -> str:
         api_key_env = str(self.get_parameter('api_key_env').value)

@@ -5,7 +5,7 @@ rdk_asr_bridge_node:
     partial_text_topic: /voice/partial_text
     publish_partial: false
     json_text_key: ''
-    require_wake_word: false
+    require_wake_word: true
     wake_words: 小智,小智小智,机器人
     remove_wake_word: true
     drop_empty: true

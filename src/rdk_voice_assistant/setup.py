@@ -33,6 +33,7 @@ setup(
             'rdk_tts_bridge_node = rdk_voice_assistant.rdk_tts_bridge_node:main',
             'local_stt_node = rdk_voice_assistant.local_stt_node:main',
             'local_tts_node = rdk_voice_assistant.local_tts_node:main',
+            'llm_dialog_node = rdk_voice_assistant.llm_dialog_node:main',
         ],
     },
 )

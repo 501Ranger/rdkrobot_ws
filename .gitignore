@@ -35,5 +35,7 @@ install_manifest.txt
 .DS_Store
 .codex
 
-#Chen
-.vscode/sftp.json
+# Local secrets
+.env
+.env.*
+src/rdk_voice_assistant/config/llm_dialog.yaml

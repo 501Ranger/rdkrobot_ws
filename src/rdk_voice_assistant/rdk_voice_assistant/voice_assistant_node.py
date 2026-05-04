@@ -15,7 +15,7 @@ from rdk_voice_assistant.intent_parser import DEFAULT_PLACE_ALIASES, Intent, par
 
 
 class VoiceAssistantNode(Node):
-    """Bridge text or ASR results into reserved robot task interfaces."""
+    """Bridge text or ASR results into robot task interfaces."""
 
     def __init__(self) -> None:
         super().__init__('voice_assistant_node')
@@ -29,6 +29,7 @@ class VoiceAssistantNode(Node):
         self.declare_parameter('enable_navigation', False)
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('places_file', '')
+        self.declare_parameter('chat_fallback_reply', True)
 
         self.command_text_topic = self.get_parameter(
             'command_text_topic').get_parameter_value().string_value
@@ -44,6 +45,8 @@ class VoiceAssistantNode(Node):
             'navigate_action_name').get_parameter_value().string_value
         self.enable_navigation = self.get_parameter(
             'enable_navigation').get_parameter_value().bool_value
+        self.chat_fallback_reply = self.get_parameter(
+            'chat_fallback_reply').get_parameter_value().bool_value
         self.map_frame = self.get_parameter(
             'map_frame').get_parameter_value().string_value
 
@@ -92,7 +95,8 @@ class VoiceAssistantNode(Node):
                 'source': 'voice',
                 'text': intent.raw_text,
             })
-            self._say('这个问题我先记录下来，后面可以接入大模型来回答。')
+            if self.chat_fallback_reply:
+                self._say('这个问题我先记录下来，后面可以接入大模型来回答。')
 
     def _handle_go_to(self, intent: Intent) -> None:
         place = intent.place
@@ -120,7 +124,10 @@ class VoiceAssistantNode(Node):
 
         display_name = place_info.get('name', place)
         if not self.enable_navigation:
-            self._say(f'好的，我识别到要去{display_name}。导航接口已经预留，当前还没有真正发送目标点。')
+            self._say(
+                f'好的，我识别到要去{display_name}。'
+                '导航接口已经预留，当前还没有真正发送目标点。'
+            )
             return
 
         self._send_nav_goal(place, place_info)

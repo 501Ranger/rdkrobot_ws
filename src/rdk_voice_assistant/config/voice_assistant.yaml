@@ -8,3 +8,4 @@ voice_assistant_node:
     navigate_action_name: /navigate_to_pose
     enable_navigation: false
     map_frame: map
+    chat_fallback_reply: true

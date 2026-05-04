@@ -1,0 +1,22 @@
+llm_dialog_node:
+  ros__parameters:
+    robot_task_topic: /voice/robot_task
+    reply_text_topic: /assistant/reply_text
+    base_url: https://token-plan-cn.xiaomimimo.com/v1
+    model: mimo-v2.5-pro
+    api_key: ''
+    api_key_env: MIMO_API_KEY
+    api_key_header: api-key
+    api_key_prefix: ''
+    timeout_sec: 20.0
+    temperature: 1.0
+    top_p: 0.95
+    max_tokens: 512
+    max_tokens_param: max_completion_tokens
+    history_turns: 4
+    system_prompt: >-
+      你是家庭陪伴机器人语音助手。用简短、自然、适合语音播报的中文回答。
+      如果用户要求机器人移动、停止、巡查或查询状态，不要假装已经执行；
+      只提醒用户可以使用明确的控制指令，例如“去客厅”“停止”“开始巡查”“查询状态”。
+    busy_reply: 我正在思考上一个问题，请稍等一下。
+    error_reply: 我现在连接大模型有点问题，稍后再试。

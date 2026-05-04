@@ -26,17 +26,14 @@ def generate_launch_description():
         description='Use simulation clock and suppress the standalone odom TF relay',
     )
 
+    # 真实机器人模式下广播 odom -> base_footprint TF
+    # 使用上位机系统时钟替换 ESP32 时间戳，解决时钟不同步问题
     odom_tf_node = Node(
         package=package_name,
         executable='odom_tf_broadcaster',
         name='odom_tf_broadcaster',
         condition=UnlessCondition(use_sim_time),
-        parameters=[{
-            'child_frame_id': 'base_footprint',
-            'use_odom_msg_stamp': False,
-            'zero_at_startup': True,
-            'use_sim_time': use_sim_time,
-        }],
+        parameters=[{'use_sim_time': use_sim_time}],
     )
 
     robot_state_publisher_node = Node(

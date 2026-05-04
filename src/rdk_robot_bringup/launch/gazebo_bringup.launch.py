@@ -10,8 +10,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    package_name = 'rdk_robot_bringup'
-    pkg_share = get_package_share_directory(package_name)
+    pkg_share = get_package_share_directory('rdk_robot_bringup')
     gazebo_share = get_package_share_directory('gazebo_ros')
 
     default_urdf = os.path.join(pkg_share, 'urdf', 'rdk_robot_gazebo.urdf')
@@ -60,7 +59,11 @@ def generate_launch_description():
     spawn_entity_node = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
-        arguments=['-entity', 'rdk_robot', '-topic', 'robot_description', '-x', '0.0', '-y', '0.0', '-z', '0.05'],
+        arguments=[
+            '-entity', 'rdk_robot',
+            '-topic', 'robot_description',
+            '-x', '0.0', '-y', '0.0', '-z', '0.1',
+        ],
         output='screen',
     )
 

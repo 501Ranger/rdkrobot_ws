@@ -1,3 +1,11 @@
+"""
+sim_slam_nav.launch.py — 仿真：Gazebo + SLAM 建图 + Nav2 导航
+
+启动顺序：
+  T=0s   Gazebo 仿真器 + 机器人模型（use_sim_time=true）
+  T=3s   SLAM Toolbox
+  T=8s   Nav2 导航栈（等待地图初始化）
+"""
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -8,7 +16,8 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    bringup_launch_dir = os.path.join(get_package_share_directory('rdk_robot_bringup'), 'launch')
+    pkg_share = get_package_share_directory('rdk_robot_bringup')
+    bringup_launch_dir = os.path.join(pkg_share, 'launch')
     gazebo_share = get_package_share_directory('gazebo_ros')
 
     world = LaunchConfiguration('world')
@@ -22,20 +31,12 @@ def generate_launch_description():
     )
     declare_urdf = DeclareLaunchArgument(
         'urdf_path',
-        default_value=os.path.join(
-            get_package_share_directory('rdk_robot_bringup'),
-            'urdf',
-            'rdk_robot_gazebo.urdf',
-        ),
+        default_value=os.path.join(pkg_share, 'urdf', 'rdk_robot_gazebo.urdf'),
         description='Gazebo URDF path',
     )
     declare_nav2_params = DeclareLaunchArgument(
         'nav2_params_file',
-        default_value=os.path.join(
-            get_package_share_directory('rdk_robot_bringup'),
-            'config',
-            'nav2_params.yaml',
-        ),
+        default_value=os.path.join(pkg_share, 'config', 'nav2_params.yaml'),
         description='Nav2 parameter file',
     )
 
@@ -57,7 +58,7 @@ def generate_launch_description():
         launch_arguments={'use_sim_time': 'true'}.items(),
     )
 
-    navigation_cmd = IncludeLaunchDescription(
+    nav2_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(bringup_launch_dir, 'navigation.launch.py')
         ),
@@ -72,8 +73,6 @@ def generate_launch_description():
     ld.add_action(declare_urdf)
     ld.add_action(declare_nav2_params)
     ld.add_action(sim_bringup)
-    ld.add_action(slam_cmd)
-    # Let slam_toolbox publish a stable map before Nav2 global_costmap subscribes.
-    ld.add_action(TimerAction(period=8.0, actions=[navigation_cmd]))
-
+    ld.add_action(TimerAction(period=3.0, actions=[slam_cmd]))
+    ld.add_action(TimerAction(period=8.0, actions=[nav2_cmd]))
     return ld

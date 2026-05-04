@@ -36,8 +36,8 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
-    bt_loop_duration: 20
-    default_server_timeout: 20
+    bt_loop_duration: 50
+    default_server_timeout: 3000
     navigators: ['navigate_to_pose', 'navigate_through_poses']
     navigate_to_pose:
       plugin: "nav2_bt_navigator/NavigateToPoseNavigator"
@@ -54,13 +54,13 @@ bt_navigator_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False
-    controller_frequency: 10.0
+    controller_frequency: 8.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 1.0
     progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker"] 
+    goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
 
     progress_checker:
@@ -95,7 +95,7 @@ controller_server:
       sim_time: 1.0
       linear_granularity: 0.05
       angular_granularity: 0.025
-      transform_tolerance: 0.2
+      transform_tolerance: 0.5
       xy_goal_tolerance: 0.15
       trans_stopped_velocity: 0.05
       short_circuit_trajectory_evaluation: True
@@ -112,7 +112,7 @@ controller_server:
       RotateToGoal.slowing_factor: 5.0
       RotateToGoal.lookahead_time: -1.0
       PreferForward.scale: 1.0
-      
+
 controller_server_rclcpp_node:
   ros__parameters:
     use_sim_time: False
@@ -120,8 +120,8 @@ controller_server_rclcpp_node:
 local_costmap:
   local_costmap:
     ros__parameters:
-      update_frequency: 5.0
-      publish_frequency: 2.0
+      update_frequency: 3.0
+      publish_frequency: 1.0
       global_frame: odom
       robot_base_frame: base_link
       use_sim_time: False
@@ -129,11 +129,12 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
+      transform_tolerance: 0.5
       footprint: "[[0.10, 0.075], [0.10, -0.075], [-0.10, -0.075], [-0.10, 0.075]]"
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.0
+        cost_scaling_factor: 4.0
         inflation_radius: 0.20
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
@@ -169,13 +170,14 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 1.0
-      publish_frequency: 1.0
+      update_frequency: 0.5
+      publish_frequency: 0.5
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
       footprint: "[[0.10, 0.075], [0.10, -0.075], [-0.10, -0.075], [-0.10, 0.075]]"
       resolution: 0.05
+      transform_tolerance: 0.5
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       obstacle_layer:
@@ -197,7 +199,7 @@ global_costmap:
         map_subscribe_transient_local: True
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.0
+        cost_scaling_factor: 4.0
         inflation_radius: 0.20
       always_send_full_costmap: False
   global_costmap_client:
@@ -214,7 +216,7 @@ map_server:
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 5.0
+    expected_planner_frequency: 2.0
     use_sim_time: False
     planner_plugins: ["GridBased"]
     GridBased:
@@ -222,6 +224,7 @@ planner_server:
       tolerance: 0.5
       use_astar: true
       allow_unknown: true
+      use_final_approach_orientation: false
 
 planner_server_rclcpp_node:
   ros__parameters:
@@ -243,7 +246,7 @@ behavior_server:
       plugin: "nav2_behaviors/Wait"
     global_frame: odom
     robot_base_frame: base_link
-    transform_tolerance: 0.1
+    transform_tolerance: 0.5
     use_sim_time: False
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.8
@@ -252,7 +255,7 @@ behavior_server:
 
 waypoint_follower:
   ros__parameters:
-    loop_rate: 200
+    loop_rate: 20
     stop_on_failure: false
     waypoint_task_executor_plugin: "wait_at_waypoint"
     wait_at_waypoint:
@@ -262,7 +265,7 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: False
-    smoothing_frequency: 20.0
+    smoothing_frequency: 10.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [0.4, 0.0, 1.5]
@@ -273,3 +276,10 @@ velocity_smoother:
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0
+
+# lifecycle_manager 在资源受限的 RDK X5 上需要更长的 bond 超时
+lifecycle_manager_navigation:
+  ros__parameters:
+    bond_timeout: 10.0
+    bond_respawn_max_duration: 10.0
+    attempt_respawn_reconnection: true

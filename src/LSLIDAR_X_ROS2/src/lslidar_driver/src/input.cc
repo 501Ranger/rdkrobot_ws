@@ -303,7 +303,7 @@ namespace lslidar_driver
         }
         if (flag == 0)
         {
-            return -1;
+            abort();
         }
 
         return q;
@@ -390,7 +390,7 @@ namespace lslidar_driver
         }
         if (flag == 0)
         {
-            return -1;
+            abort();
         }
         return 0;
     }

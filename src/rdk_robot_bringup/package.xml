@@ -11,13 +11,14 @@
   <depend>nav_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>geometry_msgs</depend>
-  <depend>gazebo_ros</depend>
-  <depend>robot_state_publisher</depend>
-  <depend>joint_state_publisher</depend>
-  <depend>slam_toolbox</depend>
-  <depend>rviz2</depend>
-  <depend>explore_lite</depend>
-  <depend>nav2_bringup</depend>
+
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>explore_lite</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>lslidar_driver</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

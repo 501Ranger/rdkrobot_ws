@@ -20,7 +20,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('rdk_robot_bringup')
     bringup_launch_dir = os.path.join(pkg_share, 'launch')
-    gazebo_share = get_package_share_directory('gazebo_ros')
+    tb3_gazebo_share = get_package_share_directory('turtlebot3_gazebo')
 
     world = LaunchConfiguration('world')
     urdf_path = LaunchConfiguration('urdf_path')
@@ -29,7 +29,7 @@ def generate_launch_description():
 
     declare_world = DeclareLaunchArgument(
         'world',
-        default_value=os.path.join(gazebo_share, 'worlds', 'empty.world'),
+        default_value=os.path.join(tb3_gazebo_share, 'worlds', 'turtlebot3_world.world'),
         description='Gazebo world file',
     )
     declare_urdf = DeclareLaunchArgument(

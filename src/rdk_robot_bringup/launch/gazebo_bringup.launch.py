@@ -12,9 +12,10 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     pkg_share = get_package_share_directory('rdk_robot_bringup')
     gazebo_share = get_package_share_directory('gazebo_ros')
+    turtlebot3_gazebo_share = get_package_share_directory('turtlebot3_gazebo')
 
     default_urdf = os.path.join(pkg_share, 'urdf', 'rdk_robot_gazebo.urdf')
-    default_world = os.path.join(gazebo_share, 'worlds', 'empty.world')
+    default_world = os.path.join(turtlebot3_gazebo_share, 'worlds', 'turtlebot3_world.world')
 
     urdf_path = LaunchConfiguration('urdf_path')
     world = LaunchConfiguration('world')

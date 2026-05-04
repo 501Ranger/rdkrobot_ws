@@ -34,3 +34,5 @@ install_manifest.txt
 *~
 .DS_Store
 CLAUDE.md
+.codex
+.claude

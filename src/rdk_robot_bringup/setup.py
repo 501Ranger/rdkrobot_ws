@@ -15,6 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*launch.py'))),
         (os.path.join('share', package_name, 'urdf'), glob(os.path.join('urdf', '*.urdf'))),
         (os.path.join('share', package_name, 'config'), glob(os.path.join('config', '*.yaml'))),
+        (os.path.join('share', package_name, 'worlds'), glob(os.path.join('worlds', '*.world'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,7 +26,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'odom_tf_broadcaster = rdk_robot_bringup.odom_tf_broadcaster:main'
+            'odom_tf_broadcaster = rdk_robot_bringup.odom_tf_broadcaster:main',
+            'auto_localize = rdk_robot_bringup.auto_localize:main',
+            'patrol_node = rdk_robot_bringup.patrol_node:main'
         ],
     },
 )

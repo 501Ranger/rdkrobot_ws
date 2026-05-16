@@ -2,6 +2,7 @@
 build/
 install/
 log/
+maps/
 
 # Python
 __pycache__/

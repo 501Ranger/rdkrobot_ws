@@ -9,6 +9,8 @@
 ```text
 rdkrobot_ws/src/
 ├── rdk_robot_bringup/     # 核心启动包：包含 URDF 模型、Launch 脚本和配置文件（Nav2, Slam Toolbox）。
+├── rdk_robot_core/        # 核心 C++ 节点：包含高频 TF 广播器 (odom_tf_broadcaster) 与巡逻节点 (patrol)。
+├── rdk_robot_apps/        # Python 应用包：包含自动全局定位脚本 (auto_localize)。
 ├── LSLIDAR_X_ROS2/        # 镭神（LSLIDAR）系列激光雷达驱动，主要支持 n10p 等型号。
 └── m-explore-ros2/        # 自主探索包：用于实现自动边界探索建图 (包含 explore 和 map_merge)。
 ```
@@ -100,11 +102,41 @@ ros2 launch rdk_robot_bringup slam.launch.py
 ros2 launch rdk_robot_bringup slam_all_in_one.launch.py
 ```
 
-#### 启动导航 (Navigation)
+#### 保存地图 (完成建图后)
+建图完成后，使用以下命令将地图保存至 `maps` 文件夹：
 ```bash
-# 启动 Nav2 导航
+ros2 run nav2_map_server map_saver_cli -f ~/rdkrobot_ws/maps/my_map
+```
+*(这会在 `~/rdkrobot_ws/maps/` 目录下生成 `my_map.pgm` 和 `my_map.yaml` 两个文件。)*
+
+#### 启动导航 (Navigation)
+
+##### 方法 A: 边建图边导航 (SLAM Toolbox Online Navigation)
+```bash
+# 启动 SLAM (提供定位和地图更新)
+ros2 launch rdk_robot_bringup slam.launch.py
+
+# 在另一个终端启动 Nav2 导航
 ros2 launch rdk_robot_bringup navigation.launch.py
 ```
+
+##### 方法 B: 使用已保存的静态地图进行导航 (AMCL 定位)
+*   **仿真环境 (Gazebo)**：
+    ```bash
+    # 启动 Gazebo 仿真 + 静态地图加载 + AMCL 定位 + Nav2 导航
+    ros2 launch rdk_robot_bringup sim_nav_with_map.launch.py map:=$HOME/rdkrobot_ws/maps/my_map.yaml
+    ```
+*   **真实机器人**：
+    ```bash
+    # 1. 启动底盘模型与 TF 广播
+    ros2 launch rdk_robot_bringup bringup_base.launch.py
+    
+    # 2. 启动雷达驱动
+    ros2 launch lslidar_driver lsn10p_launch.py
+    
+    # 3. 加载静态地图并启动 AMCL 定位与 Nav2 导航
+    ros2 launch nav2_bringup bringup_launch.py map:=$HOME/rdkrobot_ws/maps/my_map.yaml use_sim_time:=false params_file:=$HOME/rdkrobot_ws/src/rdk_robot_bringup/config/nav2_params.yaml
+    ```
 
 #### 自动化/仿真
 > **注意**：默认仿真环境使用的是 `turtlebot3_gazebo` 中的 `turtlebot3_world.world`，请确保系统中已安装该包（例如通过 `sudo apt install ros-humble-turtlebot3-gazebo`）。
@@ -118,6 +150,26 @@ ros2 launch rdk_robot_bringup sim_slam_nav.launch.py
 
 # 启动 Gazebo 仿真环境
 ros2 launch rdk_robot_bringup gazebo_bringup.launch.py
+```
+
+## 📂 辅助工具与脚本 (`scripts/`)
+工作空间根目录下的 `scripts/` 目录中包含了一套将 2D 栅格地图转换并导入为 Gazebo 三维仿真物理世界的工具链：
+
+1. **[fix_gray_walls.py](scripts/fix_gray_walls.py)**：
+   * **作用**：地图噪点清理与二值化。它能将 SLAM 建图或图像旋转产生的暗灰色过渡像素（灰度值 $< 200$）强制设为纯黑色（$0$，表示障碍物/墙体），使墙壁界限分明，并自动备份原图。
+2. **[map2world.py](scripts/map2world.py)**：
+   * **作用**：一键生成三维物理世界。它读取静态地图的 `.yaml` 和 `.pgm`，使用 OpenCV 的膨胀和闭运算连接断裂墙面并去除噪点空洞，再利用 **贪婪网格算法 (Greedy Meshing)** 将相邻墙体像素合并为大矩形方块，最终导出为 Gazebo 的 [hallway.world](src/rdk_robot_bringup/worlds/hallway.world)。
+3. **[test_greedy_mesh.py](scripts/test_greedy_mesh.py)**：
+   * **作用**：合并算法原型测试脚本。用于在不写入世界文件的情况下测试不同图像预处理参数下生成的矩形网格数量，用以评估性能。
+
+### 💡 转换工作流
+建图保存后，若要将地图还原为 Gazebo 仿真世界中的三维墙体，可运行：
+```bash
+# 1. 净化地图墙体（可选）
+python3 scripts/fix_gray_walls.py
+
+# 2. 从静态地图生成 Gazebo 世界
+python3 scripts/map2world.py
 ```
 
 ## ⚙️ 配置说明

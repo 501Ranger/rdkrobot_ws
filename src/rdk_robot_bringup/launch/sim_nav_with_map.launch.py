@@ -76,7 +76,7 @@ def generate_launch_description():
 
     # 4. 启动自动定位脚本（撒粒子 + 原地打转）
     auto_localize_node = Node(
-        package='rdk_robot_bringup',
+        package='rdk_robot_apps',
         executable='auto_localize',
         name='auto_localize',
         output='screen',

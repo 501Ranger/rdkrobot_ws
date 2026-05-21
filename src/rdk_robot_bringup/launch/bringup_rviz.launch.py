@@ -14,7 +14,7 @@ def generate_launch_description():
     # 1. Odom to TF Broadcaster (odom -> base_footprint)
     # 注意：我把子坐标系改成了 base_footprint，这样整个机器人模型都能跟着动
     odom_tf_node = Node(
-        package=package_name,
+        package='rdk_robot_core',
         executable='odom_tf_broadcaster',
         name='odom_tf_broadcaster',
         parameters=[{'child_frame_id': 'base_footprint'}] # 我们可以传参，或者直接在代码里改

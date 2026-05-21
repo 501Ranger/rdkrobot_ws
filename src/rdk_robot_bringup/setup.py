@@ -26,9 +26,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'odom_tf_broadcaster = rdk_robot_bringup.odom_tf_broadcaster:main',
-            'auto_localize = rdk_robot_bringup.auto_localize:main',
-            'patrol_node = rdk_robot_bringup.patrol_node:main'
         ],
     },
 )

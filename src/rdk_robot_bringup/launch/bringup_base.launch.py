@@ -29,7 +29,7 @@ def generate_launch_description():
     # 真实机器人模式下广播 odom -> base_footprint TF
     # 使用上位机系统时钟替换 ESP32 时间戳，解决时钟不同步问题
     odom_tf_node = Node(
-        package=package_name,
+        package='rdk_robot_core',
         executable='odom_tf_broadcaster',
         name='odom_tf_broadcaster',
         condition=UnlessCondition(use_sim_time),

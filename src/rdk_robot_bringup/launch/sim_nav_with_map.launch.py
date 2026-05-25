@@ -19,7 +19,7 @@ def generate_launch_description():
     default_world = os.path.join(pkg_share, 'worlds', 'hallway.world')
     default_urdf = os.path.join(pkg_share, 'urdf', 'rdk_robot_gazebo.urdf')
     # 默认使用实机建好的静态地图
-    default_map = os.path.join('/home/ranger/rdkrobot_ws/maps', 'my_map.yaml') 
+    default_map = os.path.join(pkg_share, 'maps', 'my_map.yaml') 
     default_nav2_params = os.path.join(pkg_share, 'config', 'nav2_sim_params.yaml')
 
     world = LaunchConfiguration('world')

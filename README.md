@@ -124,19 +124,16 @@ ros2 launch rdk_robot_bringup navigation.launch.py
 *   **仿真环境 (Gazebo)**：
     ```bash
     # 启动 Gazebo 仿真 + 静态地图加载 + AMCL 定位 + Nav2 导航
-    ros2 launch rdk_robot_bringup sim_nav_with_map.launch.py map:=$HOME/rdkrobot_ws/maps/my_map.yaml
+    ros2 launch rdk_robot_bringup sim_nav_with_map.launch.py
     ```
+    *(提示：默认加载包内的 `my_map.yaml`。若要指定其他地图路径，可传参 `map:=/path/to/your/map.yaml`)*
 *   **真实机器人**：
+    已将底盘启动、雷达驱动和带有静态地图加载的定位/导航集成到了 `nav_with_map.launch.py`：
     ```bash
-    # 1. 启动底盘模型与 TF 广播
-    ros2 launch rdk_robot_bringup bringup_base.launch.py
-    
-    # 2. 启动雷达驱动
-    ros2 launch lslidar_driver lsn10p_launch.py
-    
-    # 3. 加载静态地图并启动 AMCL 定位与 Nav2 导航
-    ros2 launch nav2_bringup bringup_launch.py map:=$HOME/rdkrobot_ws/maps/my_map.yaml use_sim_time:=false params_file:=$HOME/rdkrobot_ws/src/rdk_robot_bringup/config/nav2_params.yaml
+    # 一键启动底盘驱动 + 雷达驱动 + 静态地图加载 (AMCL) + Nav2 导航
+    ros2 launch rdk_robot_bringup nav_with_map.launch.py
     ```
+    *(提示：默认加载包内自带的 `my_map.yaml`。若要载入其他地图，可以传参 `map:=/path/to/other_map.yaml`；若需要自动全局重定位，可以传入 `auto_localize:=true`)*
 
 #### 自动化/仿真
 > **注意**：默认仿真环境使用的是 `turtlebot3_gazebo` 中的 `turtlebot3_world.world`，请确保系统中已安装该包（例如通过 `sudo apt install ros-humble-turtlebot3-gazebo`）。

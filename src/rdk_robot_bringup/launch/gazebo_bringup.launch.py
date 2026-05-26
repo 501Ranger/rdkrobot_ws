@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
@@ -16,6 +16,12 @@ def generate_launch_description():
 
     default_urdf = os.path.join(pkg_share, 'urdf', 'rdk_robot_gazebo.urdf')
     default_world = os.path.join(turtlebot3_gazebo_share, 'worlds', 'turtlebot3_world.world')
+    gazebo_model_path = os.pathsep.join(filter(None, [
+        os.path.join(turtlebot3_gazebo_share, 'models'),
+        os.path.join(pkg_share, 'models'),
+        '/usr/share/gazebo-11/models',
+        os.environ.get('GAZEBO_MODEL_PATH', ''),
+    ]))
 
     urdf_path = LaunchConfiguration('urdf_path')
     world = LaunchConfiguration('world')
@@ -37,6 +43,16 @@ def generate_launch_description():
         'use_sim_time',
         default_value='true',
         description='Use simulation clock',
+    )
+
+    set_gazebo_model_path = SetEnvironmentVariable(
+        name='GAZEBO_MODEL_PATH',
+        value=gazebo_model_path,
+    )
+
+    set_qt_platform = SetEnvironmentVariable(
+        name='QT_QPA_PLATFORM',
+        value=os.environ.get('QT_QPA_PLATFORM', 'xcb'),
     )
 
     gazebo_launch = IncludeLaunchDescription(
@@ -72,6 +88,8 @@ def generate_launch_description():
         declare_urdf,
         declare_world,
         declare_use_sim_time,
+        set_gazebo_model_path,
+        set_qt_platform,
         gazebo_launch,
         robot_state_publisher_node,
         spawn_entity_node,

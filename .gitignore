@@ -1,6 +1,8 @@
 # ROS2 / colcon workspace
 build/
+build_arm64/
 install/
+install_arm64/
 log/
 maps/
 

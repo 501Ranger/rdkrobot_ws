@@ -174,6 +174,33 @@ python3 scripts/map2world.py
 - **SLAM 参数**: `src/rdk_robot_bringup/config/mapper_params_online_async.yaml`
 - **URDF 模型**: `src/rdk_robot_bringup/urdf/`
 
+## 🖥️ 交叉编译与一键部署 (高性能主机 -> RDK X5)
+
+当我们需要在高性能的主机（x86_64）上修改代码并编译，然后部署到 RDK X5（ARM64）板卡上时，可以使用本项目提供的基于 Docker + QEMU 的交叉编译与部署工具链。
+
+### 1. 主机编译 (ARM64 架构)
+在主机上执行以下命令进行本地 ARM64 交叉编译：
+```bash
+# 启动交叉编译脚本
+bash scripts/build_arm64.sh
+```
+*提示：该脚本会自动注册 QEMU 模拟环境，通过 Docker 容器内的 `rosdep` 自动解决板卡端的依赖并进行单线程编译，编译产物输出到本地的 `install_arm64/` 中，与主机的 `install/` (x86_64) 隔离。*
+
+### 2. 一键同步部署到 RDK X5 板卡
+确保主机与 RDK X5 在同一局域网下，且板卡开启了 SSH 服务。执行以下命令同步编译产物：
+```bash
+# 启动部署脚本
+bash scripts/deploy_arm64.sh
+```
+*提示：脚本会提示您输入 RDK X5 板卡的 IP 地址、SSH 用户名（默认 `sunrise`）及目标工作空间安装路径（默认 `~/rdkrobot_ws/install`），优先通过 `rsync` 增量同步编译产物（若无则退化为 `scp`）。*
+
+### 3. 板卡端环境激活
+同步完成后，在 RDK X5 板卡终端上直接激活即可运行：
+```bash
+source ~/rdkrobot_ws/install/setup.bash
+```
+*(注意：请确保板卡端也安装了机器人运行所需的系统运行时依赖，例如 `ros-humble-slam-toolbox`、`ros-humble-navigation2` 等)*
+
 ## 🛠️ 开发规范
 - **代码风格**: 遵循 ROS 2 C++ (Ament Lint) 和 Python (PEP8) 规范。
 - **Launch 文件**: 优先使用 Python 编写 Launch 脚本。

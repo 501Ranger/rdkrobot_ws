@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RDK Robot 智能小车控制面板</title>
+    <!-- 引入 Google Fonts (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 头部导航栏 -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="logo-glow"></div>
+                <h1>RDK ROBOT <span>上位机控制舱</span></h1>
+            </div>
+            <div class="header-status">
+                <div class="status-item">
+                    <span class="label">API 连接:</span>
+                    <span id="connection-status" class="status-badge offline">未连接</span>
+                </div>
+                <div class="status-item battery-wrapper">
+                    <span class="label">小车电量:</span>
+                    <div class="battery-icon">
+                        <div id="battery-bar" class="battery-level" style="width: 0%"></div>
+                        <div id="battery-charge-indicator" class="charge-indicator hidden">⚡</div>
+                    </div>
+                    <span id="battery-text">0%</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主体栅格布局 -->
+        <main class="app-grid">
+            
+            <!-- 左栏：系统状态与基本控制 -->
+            <section class="grid-column column-left">
+                <!-- 实时看板 -->
+                <div class="card glass-card">
+                    <div class="card-header">
+                        <h2>📡 实时运行看板</h2>
+                        <div class="pulse-dot active" id="telemetry-pulse"></div>
+                    </div>
+                    <div class="telemetry-grid">
+                        <div class="tel-item">
+                            <span class="tel-label">X 坐标</span>
+                            <span class="tel-val" id="pose-x">0.000 m</span>
+                        </div>
+                        <div class="tel-item">
+                            <span class="tel-label">Y 坐标</span>
+                            <span class="tel-val" id="pose-y">0.000 m</span>
+                        </div>
+                        <div class="tel-item">
+                            <span class="tel-label">Yaw 航向</span>
+                            <span class="tel-val" id="pose-yaw">0.00°</span>
+                        </div>
+                        <div class="tel-item">
+                            <span class="tel-label">导航状态</span>
+                            <span class="tel-val status-text" id="nav-status">IDLE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模式切换 -->
+                <div class="card glass-card">
+                    <div class="card-header">
+                        <h2>🔄 运行模式切换</h2>
+                    </div>
+                    <div class="control-group mode-switcher-btns">
+                        <button class="btn btn-primary" id="btn-start-slam">开启 SLAM 建图</button>
+                        <button class="btn btn-danger" id="btn-stop-slam">停止 SLAM 建图</button>
+                    </div>
+                    <div class="map-save-wrapper">
+                        <input type="text" id="input-map-name" placeholder="输入保存地图名称 (如: room_1)" class="form-input">
+                        <button class="btn btn-success" id="btn-save-map">一键保存当前地图</button>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="control-group">
+                        <button class="btn btn-secondary" id="btn-start-explore">开启 自主探索</button>
+                        <button class="btn btn-danger" id="btn-stop-explore">关闭 自主探索</button>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="control-group localize-group-container">
+                        <button class="btn btn-warning" id="btn-auto-localize">🔄 一键全局重定位</button>
+                        <div class="localize-status-wrapper">
+                            <span class="pulse-dot active" id="localize-pulse"></span>
+                            <span id="lbl-auto-localize-status" class="status-label">未知状态</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 定时巡逻管理 -->
+                <div class="card glass-card">
+                    <div class="card-header">
+                        <h2>📅 定时巡逻配置</h2>
+                    </div>
+                    <div class="schedule-form">
+                        <input type="time" id="input-schedule-time" class="form-input">
+                        <button class="btn btn-primary" id="btn-add-schedule">添加定时任务</button>
+                    </div>
+                    <div class="schedule-list-wrapper">
+                        <h3>当前定时列表:</h3>
+                        <ul class="schedule-list" id="schedule-list">
+                            <li class="empty-list-text">暂无定时任务</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 中/右栏：地图可视化与语义导航 -->
+            <section class="grid-column column-right">
+                <!-- 地图查看器 -->
+                <div class="card glass-card map-card">
+                    <div class="card-header map-header">
+                        <h2>🗺️ 导航地图中枢</h2>
+                        <div class="map-selector-wrapper">
+                            <select id="map-select" class="form-select">
+                                <option value="">-- 请选择或拉取地图 --</option>
+                            </select>
+                            <button class="btn btn-icon-refresh" id="btn-refresh-maps">🔄 刷新</button>
+                            <button class="btn btn-primary" id="btn-load-map">加载选中地图</button>
+                        </div>
+                    </div>
+                    
+                    <div class="map-canvas-container">
+                        <div class="map-hint">💡 提示: 加载地图后，用鼠标直接点击地图图像可自动提取坐标点！</div>
+                        <div class="map-image-wrapper">
+                            <!-- 缩放与平移控制工具栏 -->
+                            <div class="map-toolbar" id="map-toolbar">
+                                <button class="btn-tool" id="btn-zoom-in" title="放大">➕</button>
+                                <button class="btn-tool" id="btn-zoom-out" title="缩小">➖</button>
+                                <button class="btn-tool" id="btn-zoom-reset" title="重置">🏠</button>
+                            </div>
+                            
+                            <div id="map-inner-container" class="map-inner-container hidden">
+                                <img id="map-image" src="" alt="等待地图加载..." class="map-img-element">
+                                <div id="robot-marker" class="robot-marker hidden">
+                                    <div class="arrow"></div>
+                                </div>
+                            </div>
+                            <div id="map-loading" class="map-loader hidden">
+                                <div class="spinner"></div>
+                                <span>正在转换并加载 PGM 图像...</span>
+                            </div>
+                            <div id="map-placeholder" class="map-placeholder-box">
+                                <span>暂未加载地图，请在上方选择并点击“加载选中地图”</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 导航与语义点管理 -->
+                <div class="double-grid">
+                    <!-- 语义点标定 -->
+                    <div class="card glass-card">
+                        <div class="card-header">
+                            <h2>📍 语义点 (POI) 标定</h2>
+                        </div>
+                        <div class="poi-form">
+                            <div class="form-row">
+                                <label for="poi-name">点名称</label>
+                                <input type="text" id="poi-name" placeholder="如: kitchen" class="form-input">
+                            </div>
+                            <div class="form-row coords-row">
+                                <div>
+                                    <label for="poi-x">X 坐标</label>
+                                    <input type="number" step="0.001" id="poi-x" class="form-input">
+                                </div>
+                                <div>
+                                    <label for="poi-y">Y 坐标</label>
+                                    <input type="number" step="0.001" id="poi-y" class="form-input">
+                                </div>
+                                <div>
+                                    <label for="poi-yaw">Yaw 朝向</label>
+                                    <input type="number" step="0.001" id="poi-yaw" value="0.0" class="form-input">
+                                </div>
+                            </div>
+                            <div class="form-buttons">
+                                <button class="btn btn-success" id="btn-save-poi">保存点位到当前地图</button>
+                                <button class="btn btn-primary" id="btn-navigate-coords">前往该坐标</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 语义点列表与巡逻控制 -->
+                    <div class="card glass-card">
+                        <div class="card-header">
+                            <h2>🚀 语义点导航 & 巡逻控制</h2>
+                        </div>
+                        <div class="tab-content">
+                            <div class="poi-list-section">
+                                <h3>当前地图已标记语义点:</h3>
+                                <div class="poi-list-container">
+                                    <ul class="poi-list" id="poi-list">
+                                        <li class="empty-list-text">暂无已存标记点</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="divider"></div>
+                            <div class="patrol-control-section">
+                                <h3>巡逻指令中枢:</h3>
+                                <div class="patrol-btn-grid">
+                                    <button class="btn btn-primary" id="btn-patrol-start">启动巡逻</button>
+                                    <button class="btn btn-warning" id="btn-patrol-pause">暂停</button>
+                                    <button class="btn btn-primary" id="btn-patrol-resume">继续</button>
+                                    <button class="btn btn-danger" id="btn-patrol-stop">终止</button>
+                                </div>
+                            </div>
+                            <div class="nav-cancel-section">
+                                <button class="btn btn-danger btn-block" id="btn-nav-cancel">🚨 紧急中止当前导航</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- 弹窗提示组件 -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

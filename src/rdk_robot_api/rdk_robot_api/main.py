@@ -13,7 +13,8 @@ from typing import List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import rclpy
@@ -41,6 +42,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 寻找并确定静态文件目录的路径
+try:
+    share_dir = get_package_share_directory('rdk_robot_api')
+    static_dir = os.path.join(share_dir, 'static')
+except Exception:
+    # 备用本地开发路径
+    static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
+
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+def read_index():
+    """返回主页 HMI 控制面板"""
+    index_path = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail=f"index.html not found in {static_dir}")
+
 
 # Pydantic 模型的请求载荷定义
 class CommandPayload(BaseModel):
@@ -225,6 +246,7 @@ scheduler = None
 # 子进程与地图路径管理
 slam_process = None
 explore_process = None
+loc_process = None
 MAPS_DIR = os.path.expanduser("~/rdkrobot_ws/maps")
 current_map_name = None
 
@@ -335,18 +357,48 @@ def get_auto_localize_status():
         "is_localizing": ros_node.is_localizing
     }
 
+
+def check_use_sim_time(node) -> bool:
+    """通过检测 /clock 话题自动推断是否处于仿真环境"""
+    if not node:
+        return False
+    try:
+        topic_names_and_types = node.get_topic_names_and_types()
+        for topic_name, _ in topic_names_and_types:
+            if topic_name == '/clock':
+                node.get_logger().info("Detected '/clock' topic. Auto-configured use_sim_time := true")
+                return True
+    except Exception as e:
+        node.get_logger().warn(f"Failed to detect /clock topic: {e}")
+    node.get_logger().info("No '/clock' topic detected. Auto-configured use_sim_time := false")
+    return False
+
+
 # SLAM 建图控制接口
 
 @app.post("/api/v1/slam/start")
 def start_slam_mapping():
     """启动 SLAM 建图"""
-    global slam_process
+    global slam_process, loc_process
+    
+    # 1. 检查并确保定位节点（map_server/amcl）关闭，防止 TF 与 /map 冲突
+    if loc_process and loc_process.poll() is None:
+        ros_node.get_logger().info("SLAM requested. Terminating active localization/map_server process...")
+        loc_process.terminate()
+        try:
+            loc_process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            loc_process.kill()
+        loc_process = None
+
     if slam_process and slam_process.poll() is None:
         return {"status": "success", "message": "SLAM mapping is already running."}
     
+    use_sim = check_use_sim_time(ros_node)
+    sim_flag = "true" if use_sim else "false"
     cmd = [
         "bash", "-c",
-        "source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup slam.launch.py"
+        f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup slam.launch.py use_sim_time:={sim_flag}"
     ]
     try:
         slam_process = subprocess.Popen(cmd)
@@ -550,7 +602,7 @@ def get_map_image(map_name: str):
 @app.post("/api/v1/maps/{map_name}/load")
 def load_map_into_navigation(map_name: str):
     """动态将指定地图载入 Nav2 导航系统"""
-    global current_map_name
+    global current_map_name, slam_process, loc_process
     if not ros_node:
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
         
@@ -558,7 +610,42 @@ def load_map_into_navigation(map_name: str):
     if not os.path.exists(yaml_path):
         raise HTTPException(status_code=404, detail=f"Map yaml {map_name}.yaml not found")
         
-    if not ros_node.load_map_cli.service_is_ready():
+    # 1. 互斥安全检查：如果要加载静态地图定位导航，先关闭 SLAM 建图
+    if slam_process and slam_process.poll() is None:
+        ros_node.get_logger().info("Map loading requested. Terminating active SLAM process...")
+        slam_process.terminate()
+        try:
+            slam_process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            slam_process.kill()
+        slam_process = None
+
+    # 2. 检查并确保定位节点（map_server & amcl）已经启动
+    if loc_process is None or loc_process.poll() is not None:
+        ros_node.get_logger().info("Starting localization (map_server & amcl) process...")
+        use_sim = check_use_sim_time(ros_node)
+        sim_flag = "true" if use_sim else "false"
+        cmd = [
+            "bash", "-c",
+            f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
+        ]
+        try:
+            loc_process = subprocess.Popen(cmd)
+            # 给服务 3 秒初始化时间，再尝试调用它的加载服务
+            time.sleep(3.0)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to start localization launch: {e}")
+
+    # 3. 检查服务是否就绪
+    # 最多尝试等待 5 秒，直到服务可用
+    service_ready = False
+    for _ in range(50):
+        if ros_node.load_map_cli.service_is_ready():
+            service_ready = True
+            break
+        time.sleep(0.1)
+
+    if not service_ready:
         raise HTTPException(
             status_code=503, 
             detail="Nav2 LoadMap service (/map_server/load_map) is not available. Ensure Nav2 Map Server is running."

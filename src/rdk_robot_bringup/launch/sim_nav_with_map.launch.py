@@ -14,12 +14,13 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('rdk_robot_bringup')
     bringup_launch_dir = os.path.join(pkg_share, 'launch')
     nav2_bringup_share = get_package_share_directory('nav2_bringup')
+    tb3_gazebo_share = get_package_share_directory('turtlebot3_gazebo')
     
-    # 默认使用我们刚自动生成的楼道 world 文件
-    default_world = os.path.join(pkg_share, 'worlds', 'hallway.world')
+    # 默认使用 turtlebot3_world.world
+    default_world = os.path.join(tb3_gazebo_share, 'worlds', 'turtlebot3_world.world')
     default_urdf = os.path.join(pkg_share, 'urdf', 'rdk_robot_gazebo.urdf')
     # 默认使用实机建好的静态地图
-    default_map = os.path.join(pkg_share, 'maps', 'my_map.yaml') 
+    default_map = os.path.join(pkg_share, "maps", "string.yaml") 
     default_nav2_params = os.path.join(pkg_share, 'config', 'nav2_sim_params.yaml')
 
     world = LaunchConfiguration('world')

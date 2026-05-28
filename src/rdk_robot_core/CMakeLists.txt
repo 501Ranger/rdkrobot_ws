@@ -19,6 +19,7 @@ find_package(nav2_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 # 编译 Odom TF 广播器
 add_executable(odom_tf_broadcaster src/odom_tf_broadcaster.cpp)
@@ -44,6 +45,8 @@ ament_target_dependencies(patrol
   rclcpp
   rclcpp_action
   nav2_msgs
+  geometry_msgs
+  std_msgs
 )
 
 # 安装配置

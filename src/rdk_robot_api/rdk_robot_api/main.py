@@ -146,6 +146,7 @@ class RobotApiNode(Node):
         
         # 导航相关变量
         self.current_nav_goal_handle = None
+        self.latest_goal_id = 0
         self.nav_status = "idle"  # "idle", "navigating", "reached", "failed", "canceled"
 
         # 下位机在线检测时间戳
@@ -280,14 +281,23 @@ class RobotApiNode(Node):
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
 
+        self.latest_goal_id += 1
+        goal_id = self.latest_goal_id
         self.nav_status = "navigating"
-        self.get_logger().info(f"Sending navigation goal to Action Server: x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
+        self.get_logger().info(f"Sending navigation goal to Action Server (Goal ID: {goal_id}): x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
 
         send_goal_future = self.nav_action_client.send_goal_async(goal_msg)
-        send_goal_future.add_done_callback(self.nav_goal_response_callback)
+        send_goal_future.add_done_callback(
+            lambda fut, gid=goal_id: self.nav_goal_response_callback(fut, gid)
+        )
         return True
 
-    def nav_goal_response_callback(self, future):
+    def nav_goal_response_callback(self, future, goal_id):
+        # 如果当前有更新的导航请求被发送，直接忽略这个旧请求的响应
+        if goal_id != self.latest_goal_id:
+            self.get_logger().info(f"Goal response for an outdated request {goal_id} (latest is {self.latest_goal_id}). Ignoring.")
+            return
+
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().info("Navigation goal rejected by Action Server.")
@@ -299,12 +309,19 @@ class RobotApiNode(Node):
 
         # 监听结果
         get_result_future = goal_handle.get_result_async()
-        get_result_future.add_done_callback(self.nav_result_callback)
+        get_result_future.add_done_callback(
+            lambda fut, gid=goal_id, gh=goal_handle: self.nav_result_callback(fut, gid, gh)
+        )
 
-    def nav_result_callback(self, future):
+    def nav_result_callback(self, future, goal_id, goal_handle):
+        # 仅处理最新的导航请求及对应的 goal_handle 的结果，防止旧请求的回调覆盖当前状态
+        if goal_id != self.latest_goal_id or goal_handle != self.current_nav_goal_handle:
+            self.get_logger().info(f"Received result for an inactive/superseded goal {goal_id}. Ignoring.")
+            return
+
         result = future.result()
         status = result.status
-        self.get_logger().info(f"Navigation completed with Action status code: {status}")
+        self.get_logger().info(f"Navigation completed with Action status code: {status} for Goal ID: {goal_id}")
 
         # ROS 2 Action 状态码定义: 
         # STATUS_SUCCEEDED = 4, STATUS_CANCELED = 5
@@ -333,6 +350,7 @@ scheduler = None
 slam_process = None
 explore_process = None
 loc_process = None
+nav2_process = None
 sim_process = None
 agent_process = None
 MAPS_DIR = os.path.expanduser("~/rdkrobot_ws/maps")
@@ -590,14 +608,67 @@ def check_use_sim_time(node) -> bool:
     return False
 
 
+# Nav2 导航栈状态查询接口（仅供内部监控用，启停由 SLAM 联动控制）
+
+@app.get("/api/v1/nav2/status")
+def get_nav2_status():
+    """获取 Nav2 导航栈运行状态"""
+    running = (nav2_process is not None) and (nav2_process.poll() is None)
+    return {"running": running}
+
 # SLAM 建图控制接口
+
+def _auto_start_nav2_after_delay(use_sim: bool, delay: float = 8.0):
+    """后台线程：等待 SLAM 初始化后自动拉起 Nav2 导航栈"""
+    global nav2_process
+    time.sleep(delay)
+
+    # 如果 SLAM 已经不在了（被用户手动停止），就不再启动
+    if slam_process is None or slam_process.poll() is not None:
+        if ros_node:
+            ros_node.get_logger().info("Auto-Nav2: SLAM is no longer running. Skipping Nav2 auto-start.")
+        return
+
+    if nav2_process and nav2_process.poll() is None:
+        if ros_node:
+            ros_node.get_logger().info("Auto-Nav2: Nav2 is already running. Skip.")
+        return
+
+    sim_flag = "true" if use_sim else "false"
+    try:
+        bringup_share = get_package_share_directory('rdk_robot_bringup')
+        params_file = os.path.join(
+            bringup_share, 'config',
+            'nav2_sim_params.yaml' if use_sim else 'nav2_params.yaml'
+        )
+    except Exception:
+        params_file = (
+            f"/home/ranger/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/"
+            f"{'nav2_sim_params.yaml' if use_sim else 'nav2_params.yaml'}"
+        )
+
+    cmd = [
+        "bash", "-c",
+        f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && "
+        f"ros2 launch rdk_robot_bringup navigation.launch.py use_sim_time:={sim_flag} params_file:={params_file}"
+    ]
+    try:
+        nav2_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        if ros_node:
+            ros_node.get_logger().info(
+                f"Auto-Nav2: Nav2 navigation stack started automatically (sim={sim_flag}, params={os.path.basename(params_file)})."
+            )
+    except Exception as e:
+        if ros_node:
+            ros_node.get_logger().error(f"Auto-Nav2: Failed to start Nav2: {e}")
+
 
 @app.post("/api/v1/slam/start")
 def start_slam_mapping():
     """启动 SLAM 建图"""
     global slam_process, loc_process
     
-    # 1. 检查并确保定位节点（map_server/amcl）挂起，释放 /map 话题和 TF，防止冲突
+    # 1. 检查并确保定位节点（map_server/amcl）挂起，释放 /map 话题 and TF，防止冲突
     if loc_process and loc_process.poll() is None:
         ros_node.get_logger().info("SLAM requested. Pausing active localization nodes...")
         ros_node.change_localization_manager_state(1) # PAUSE
@@ -605,8 +676,27 @@ def start_slam_mapping():
     # 2. 如果 SLAM 进程已经运行，直接返回
     if slam_process and slam_process.poll() is None:
         return {"status": "success", "message": "SLAM mapping is already running."}
-    
+
+    # 3. 仿真模式下，等待 /odom 话题就绪（最多等 12 秒）
+    #    Gazebo 的 diff_drive 插件需要数秒才能完成初始化并发布 odom→base_footprint TF
+    #    若 slam_toolbox 在 TF 链就绪之前启动，它会因获取不到变换而静默失败（只剩激光点云无地图）
     use_sim = check_use_sim_time(ros_node)
+    if use_sim:
+        ros_node.get_logger().info("Sim mode: waiting for /odom topic to be ready before starting SLAM...")
+        odom_ready = False
+        for _ in range(120):  # 最多等待 12 秒
+            topic_names = [name for name, _ in ros_node.get_topic_names_and_types()]
+            if "/odom" in topic_names and ros_node.last_odom_time > 0.0:
+                odom_ready = True
+                ros_node.get_logger().info("/odom is active. Proceeding to start SLAM.")
+                break
+            time.sleep(0.1)
+        if not odom_ready:
+            raise HTTPException(
+                status_code=503,
+                detail="Timeout waiting for /odom topic. Make sure Gazebo simulation is fully running before starting SLAM."
+            )
+
     sim_flag = "true" if use_sim else "false"
     cmd = [
         "bash", "-c",
@@ -614,22 +704,38 @@ def start_slam_mapping():
     ]
     try:
         slam_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
-        return {"status": "success", "message": "SLAM mapping node process started."}
+
+        # SLAM 启动成功后，在后台线程中延时自动拉起 Nav2
+        nav2_thread = threading.Thread(
+            target=_auto_start_nav2_after_delay,
+            args=(use_sim,),
+            daemon=True
+        )
+        nav2_thread.start()
+
+        return {"status": "success", "message": "SLAM mapping started. Nav2 will auto-start in ~8s."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start SLAM: {e}")
 
 @app.post("/api/v1/slam/stop")
 def stop_slam_mapping():
-    """停止 SLAM 建图"""
-    global slam_process
+    """停止 SLAM 建图（同时联动停止 Nav2 导航栈）"""
+    global slam_process, nav2_process
     if not slam_process or slam_process.poll() is not None:
         return {"status": "success", "message": "SLAM mapping is not running."}
-    
+
     try:
         ros_node.get_logger().info("Terminating slam_toolbox process group...")
         terminate_process_group(slam_process)
         slam_process = None
-        return {"status": "success", "message": "SLAM mapping process stopped successfully."}
+
+        # 联动停止 Nav2（SLAM 停了，/map 就没了，导航也没有意义继续运行）
+        if nav2_process and nav2_process.poll() is None:
+            ros_node.get_logger().info("Auto-stopping Nav2 navigation stack along with SLAM...")
+            terminate_process_group(nav2_process)
+            nav2_process = None
+
+        return {"status": "success", "message": "SLAM mapping and Nav2 navigation stopped successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to stop SLAM: {e}")
 
@@ -1039,6 +1145,7 @@ def main():
         terminate_process_group(slam_process)
         terminate_process_group(explore_process)
         terminate_process_group(loc_process)
+        terminate_process_group(nav2_process)
         terminate_process_group(sim_process)
         terminate_process_group(agent_process)
         os.system("docker kill microros_agent >/dev/null 2>&1 || true")

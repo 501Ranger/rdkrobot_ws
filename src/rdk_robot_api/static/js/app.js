@@ -21,6 +21,9 @@ let dragStartY = 0;
 
 // DOM 载入完成后的初始化
 document.addEventListener("DOMContentLoaded", () => {
+    // 00. 初始化页面配色主题
+    initTheme();
+
     // 0. 检测系统环境是否为 ARM 以展示或隐藏仿真控制
     checkSystemInfo();
 
@@ -827,6 +830,12 @@ function deleteSchedule(id) {
 // ==========================================
 
 function setupEventListeners() {
+    // 主题切换事件
+    const themeBtn = document.getElementById("btn-theme-toggle");
+    if (themeBtn) {
+        themeBtn.addEventListener("click", toggleTheme);
+    }
+
     // A. 刷新地图列表
     document.getElementById("btn-refresh-maps").addEventListener("click", refreshMapList);
     
@@ -1130,6 +1139,61 @@ function drawTrajectory() {
     polyline.setAttribute("points", pointsStr.trim());
 }
 
+let cachedPreviewPath = [];
+let lastWaypointHash = "";
+let previewTimer = null;
+
+function drawPolylineFromPoints(polyline, pointsList) {
+    if (!currentMap) return;
+    const img = document.getElementById("map-image");
+    const naturalHeight = img.naturalHeight;
+    const resolution = currentMap.resolution;
+    const originX = currentMap.origin[0];
+    const originY = currentMap.origin[1];
+    
+    let pointsStr = "";
+    pointsList.forEach(pt => {
+        const px = (pt.x - originX) / resolution;
+        const py = naturalHeight - ((pt.y - originY) / resolution);
+        pointsStr += `${px.toFixed(1)},${py.toFixed(1)} `;
+    });
+    polyline.setAttribute("points", pointsStr.trim());
+}
+
+function triggerPathPreviewDebounced(polyline) {
+    if (previewTimer) clearTimeout(previewTimer);
+    
+    // 立即降级：先用直线段快速连接，提供即时视觉反馈
+    let straightPoints = [];
+    if (currentPose) {
+        straightPoints.push({ x: currentPose.x, y: currentPose.y });
+    }
+    waypointList.forEach(wp => straightPoints.push({ x: wp.x, y: wp.y }));
+    drawPolylineFromPoints(polyline, straightPoints);
+    
+    // 防抖发送预览请求，避免频繁拖拽/点击时密集调用 Action 耗尽系统资源
+    previewTimer = setTimeout(() => {
+        fetch(`${API_BASE}/api/v1/nav/preview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ waypoints: waypointList })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Preview API error");
+            return res.json();
+        })
+        .then(data => {
+            if (data.status === "success" && data.path && data.path.length > 0) {
+                cachedPreviewPath = data.path;
+                drawPolylineFromPoints(polyline, cachedPreviewPath);
+            }
+        })
+        .catch(err => {
+            console.warn("Nav2 path preview failed, fallback to straight line:", err);
+        });
+    }, 400);
+}
+
 function drawPlannedPath() {
     const polyline = document.getElementById("planned-path");
     const group = document.getElementById("waypoint-markers-group");
@@ -1143,12 +1207,18 @@ function drawPlannedPath() {
     const originY = currentMap.origin[1];
     
     group.innerHTML = "";
-    let pointsStr = "";
     
+    if (waypointList.length === 0) {
+        polyline.setAttribute("points", "");
+        cachedPreviewPath = [];
+        lastWaypointHash = "";
+        return;
+    }
+    
+    // 1. 绘制带有编号的航点 Marker
     waypointList.forEach((wp, index) => {
         const px = (wp.x - originX) / resolution;
         const py = naturalHeight - ((wp.y - originY) / resolution);
-        pointsStr += `${px.toFixed(1)},${py.toFixed(1)} `;
         
         const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         circle.setAttribute("cx", px);
@@ -1168,7 +1238,18 @@ function drawPlannedPath() {
         group.appendChild(text);
     });
     
-    polyline.setAttribute("points", pointsStr.trim());
+    // 2. 生成当前状态指纹哈希（包含点位置以及小车起点位置）
+    const currentHash = JSON.stringify(waypointList) + `_${currentPose?.x.toFixed(2)}_${currentPose?.y.toFixed(2)}`;
+    
+    // 3. 如果指纹未改变且有精细缓存，直接以缓存重绘（如仅仅是拖拽缩放地图的情况）
+    if (currentHash === lastWaypointHash && cachedPreviewPath.length > 0) {
+        drawPolylineFromPoints(polyline, cachedPreviewPath);
+        return;
+    }
+    
+    // 4. 指纹发生改变，触发异步防抖预览规划
+    lastWaypointHash = currentHash;
+    triggerPathPreviewDebounced(polyline);
 }
 
 function drawNav2Path(path) {
@@ -1393,5 +1474,34 @@ function updateAgentButtonStates(running) {
             btnStartAgent.disabled = false;
             btnStopAgent.disabled = true;
         }
+    }
+}
+
+// 配色主题控制 (Theme controls)
+function initTheme() {
+    const savedTheme = localStorage.getItem("theme") || "dark";
+    const btn = document.getElementById("btn-theme-toggle");
+    if (savedTheme === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+        if (btn) btn.innerText = "☀️";
+    } else {
+        document.documentElement.removeAttribute("data-theme");
+        if (btn) btn.innerText = "🌙";
+    }
+}
+
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute("data-theme");
+    const btn = document.getElementById("btn-theme-toggle");
+    if (currentTheme === "light") {
+        document.documentElement.removeAttribute("data-theme");
+        localStorage.setItem("theme", "dark");
+        if (btn) btn.innerText = "🌙";
+        showToast("已切换至深色科技模式", "success");
+    } else {
+        document.documentElement.setAttribute("data-theme", "light");
+        localStorage.setItem("theme", "light");
+        if (btn) btn.innerText = "☀️";
+        showToast("已切换至高雅浅色模式", "success");
     }
 }

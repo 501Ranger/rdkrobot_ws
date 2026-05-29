@@ -25,6 +25,43 @@
     --glass-blur: blur(12px);
     --border-radius: 12px;
     --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    /* 输入控件与地图底板的主题变量 */
+    --input-bg: rgba(0, 0, 0, 0.3);
+    --input-border: rgba(255, 255, 255, 0.1);
+    --map-bg: rgba(0, 0, 0, 0.5);
+    --item-bg: rgba(255, 255, 255, 0.02);
+    --item-border: rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme="light"] {
+    --bg-color: #f1f5f9;
+    --panel-bg: rgba(255, 255, 255, 0.65);
+    --panel-border: rgba(0, 0, 0, 0.08);
+    
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    
+    --accent-cyan: #0ea5e9;
+    --accent-cyan-glow: rgba(14, 165, 233, 0.15);
+    
+    --accent-green: #059669;
+    --accent-green-glow: rgba(5, 150, 105, 0.15);
+    
+    --accent-red: #dc2626;
+    --accent-red-glow: rgba(220, 38, 38, 0.15);
+    
+    --accent-orange: #d97706;
+    --accent-orange-glow: rgba(217, 119, 6, 0.15);
+    
+    --accent-purple: #7c3aed;
+    
+    --input-bg: rgba(255, 255, 255, 0.6);
+    --input-border: rgba(0, 0, 0, 0.12);
+    --map-bg: rgba(255, 255, 255, 0.85);
+    --item-bg: rgba(0, 0, 0, 0.02);
+    --item-border: rgba(0, 0, 0, 0.05);
 }
 
 /* Global Reset & Base Styling */
@@ -304,8 +341,8 @@ body {
 .form-input {
     width: 100%;
     padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
     border-radius: 8px;
     color: var(--text-primary);
     font-size: 0.875rem;
@@ -320,8 +357,8 @@ body {
 
 .form-select {
     padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
     border-radius: 8px;
     color: var(--text-primary);
     font-size: 0.875rem;
@@ -422,6 +459,13 @@ body {
     background: rgba(255, 255, 255, 0.15);
 }
 
+.btn-theme-toggle {
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.btn-theme-toggle:hover {
+    transform: rotate(30deg) scale(1.1);
+}
+
 /* Control Layout Components */
 .control-group {
     display: grid;
@@ -480,8 +524,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: var(--item-bg);
+    border: 1px solid var(--item-border);
     padding: 8px 12px;
     border-radius: 6px;
     font-size: 0.85rem;
@@ -554,8 +598,8 @@ body {
 }
 
 .map-image-wrapper {
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--map-bg);
+    border: 1px solid var(--panel-border);
     border-radius: 8px;
     flex-grow: 1;
     display: flex;
@@ -670,8 +714,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: var(--item-bg);
+    border: 1px solid var(--item-border);
     padding: 6px 10px;
     border-radius: 6px;
     font-size: 0.8rem;
@@ -1030,8 +1074,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--item-bg);
+    border: 1px solid var(--item-border);
     padding: 8px 12px;
     border-radius: 6px;
     font-size: 0.8rem;

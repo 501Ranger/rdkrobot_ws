@@ -7,11 +7,12 @@ import math
 import yaml
 import cv2
 import json
+import signal
 from io import BytesIO
 from datetime import datetime
 from typing import List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,9 +27,12 @@ from geometry_msgs.msg import PoseArray, Pose
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import BatteryState
 from nav_msgs.msg import Odometry
-from nav2_msgs.srv import LoadMap
+from nav2_msgs.srv import LoadMap, ManageLifecycleNodes
 from nav2_msgs.action import NavigateToPose
 from ament_index_python.packages import get_package_share_directory
+from lifecycle_msgs.srv import ChangeState
+from lifecycle_msgs.msg import Transition
+import platform
 
 from .scheduler import PatrolScheduler
 
@@ -42,6 +46,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 针对 HMI 主页和静态文件禁用缓存中间件，解决浏览器强缓存旧 JS 代码的问题
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 # 寻找并确定静态文件目录的路径
 try:
@@ -134,8 +148,13 @@ class RobotApiNode(Node):
         self.current_nav_goal_handle = None
         self.nav_status = "idle"  # "idle", "navigating", "reached", "failed", "canceled"
 
+        # 下位机在线检测时间戳
+        self.last_battery_time = 0.0
+        self.last_odom_time = 0.0
+
     def battery_callback(self, msg: BatteryState):
         self.battery_pct = msg.percentage * 100.0 if msg.percentage <= 1.0 else msg.percentage
+        self.last_battery_time = time.time()
 
     def odom_callback(self, msg: Odometry):
         pos = msg.pose.pose.position
@@ -151,9 +170,76 @@ class RobotApiNode(Node):
             "y": pos.y,
             "yaw": yaw
         }
+        self.last_odom_time = time.time()
 
     def localize_status_callback(self, msg: Bool):
         self.is_localizing = msg.data
+
+    def change_lifecycle_state(self, node_name: str, transition_id: int) -> bool:
+        """调用 ROS 2 Lifecycle 服务更改节点运行状态"""
+        srv_name = f"/{node_name}/change_state"
+        client = self.create_client(ChangeState, srv_name)
+        
+        self.get_logger().info(f"Waiting for lifecycle service: {srv_name}...")
+        if not client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().error(f"Lifecycle service {srv_name} not available.")
+            return False
+            
+        req = ChangeState.Request()
+        req.transition.id = transition_id
+        
+        self.get_logger().info(f"Calling change_state on {node_name} with transition id {transition_id}...")
+        future = client.call_async(req)
+        
+        # 阻塞等待结果
+        start_time = time.time()
+        timeout = 4.0
+        while not future.done():
+            time.sleep(0.1)
+            if time.time() - start_time > timeout:
+                self.get_logger().error(f"Timeout waiting for {node_name} state transition.")
+                return False
+                
+        res = future.result()
+        if res and res.success:
+            self.get_logger().info(f"Successfully transitioned {node_name} state.")
+            return True
+        else:
+            self.get_logger().error(f"Failed to transition {node_name} state.")
+            return False
+
+    def change_localization_manager_state(self, command_id: int) -> bool:
+        """调用 lifecycle_manager_localization 服务的 manage_nodes 来暂停/恢复/重置定位节点"""
+        srv_name = "/lifecycle_manager_localization/manage_nodes"
+        client = self.create_client(ManageLifecycleNodes, srv_name)
+        
+        self.get_logger().info(f"Waiting for localization manager service: {srv_name}...")
+        if not client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().error(f"Localization manager service {srv_name} not available.")
+            return False
+            
+        req = ManageLifecycleNodes.Request()
+        req.command = command_id
+        
+        self.get_logger().info(f"Calling manage_nodes with command {command_id}...")
+        future = client.call_async(req)
+        
+        # 阻塞等待结果
+        start_time = time.time()
+        timeout = 4.0
+        while not future.done():
+            time.sleep(0.1)
+            if time.time() - start_time > timeout:
+                self.get_logger().error(f"Timeout waiting for localization manager state change.")
+                return False
+                
+        res = future.result()
+        if res and res.success:
+            self.get_logger().info(f"Successfully changed localization manager state.")
+            return True
+        else:
+            self.get_logger().error(f"Failed to change localization manager state.")
+            return False
 
     def publish_patrol_cmd(self, cmd: str):
         msg = String()
@@ -247,8 +333,29 @@ scheduler = None
 slam_process = None
 explore_process = None
 loc_process = None
+sim_process = None
+agent_process = None
 MAPS_DIR = os.path.expanduser("~/rdkrobot_ws/maps")
 current_map_name = None
+
+
+def terminate_process_group(process):
+    """安全中止进程及其全部子进程组"""
+    if not process or process.poll() is not None:
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            process.wait()
+    except Exception:
+        process.terminate()
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
 
 
 def trigger_patrol_by_schedule():
@@ -260,17 +367,126 @@ def trigger_patrol_by_schedule():
 
 # FastAPI 路由定义
 
+@app.get("/api/v1/system/info")
+def get_system_info():
+    """获取系统架构信息，用于前端判断是否为嵌入式 ARM 主机以控制仿真界面展示"""
+    machine = platform.machine().lower()
+    is_arm = "arm" in machine or "aarch64" in machine
+    return {
+        "is_arm": is_arm,
+        "machine": machine
+    }
+
 @app.get("/api/v1/robot/status")
 def get_robot_status():
-    """获取小车电池、位姿等实时状态"""
+    """获取小车电池、位姿等实时状态以及下位机在线状态"""
     if not ros_node:
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
+    
+    # 动态检测下位机是否在线：3秒内收到过电池包或里程计包即视为在线
+    current_time = time.time()
+    mcu_online = (current_time - ros_node.last_battery_time < 3.0) or \
+                 (current_time - ros_node.last_odom_time < 3.0)
+                 
     return {
         "battery_percentage": round(ros_node.battery_pct, 1),
         "pose": ros_node.robot_pose,
         "is_localizing": ros_node.is_localizing,
-        "nav_status": ros_node.nav_status
+        "nav_status": ros_node.nav_status,
+        "mcu_online": mcu_online
     }
+
+# Gazebo 仿真控制接口
+
+@app.post("/api/v1/sim/start")
+def start_gazebo_simulation():
+    """启动 Gazebo 仿真"""
+    global sim_process
+    if sim_process and sim_process.poll() is None:
+        return {"status": "success", "message": "Simulation is already running."}
+        
+    # 启动前强制清理残留的孤立 Gazebo 进程，防止端口/Master占用导致无法正常加载 GUI
+    try:
+        os.system("pkill -9 -f gzserver || true")
+        os.system("pkill -9 -f gzclient || true")
+        os.system("pkill -9 -f gazebo || true")
+    except Exception as e:
+        if ros_node:
+            ros_node.get_logger().warn(f"Failed to clear old gazebo processes: {e}")
+        
+    cmd = [
+        "bash", "-c",
+        "source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup gazebo_bringup.launch.py"
+    ]
+    try:
+        sim_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        return {"status": "success", "message": "Gazebo simulation started successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start Gazebo simulation: {e}")
+
+@app.post("/api/v1/sim/stop")
+def stop_gazebo_simulation():
+    """停止 Gazebo 仿真"""
+    global sim_process
+    if not sim_process or sim_process.poll() is not None:
+        return {"status": "success", "message": "Simulation is not running."}
+        
+    try:
+        terminate_process_group(sim_process)
+        sim_process = None
+        return {"status": "success", "message": "Gazebo simulation stopped successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop Gazebo simulation: {e}")
+
+
+# micro-ROS 代理控制接口
+
+@app.post("/api/v1/agent/start")
+def start_microros_agent():
+    """启动 micro-ROS 串口代理 (Docker)"""
+    global agent_process
+    # 检测是否已经在运行
+    res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
+    if res == 0:
+        return {"status": "success", "message": "micro-ROS agent is already running."}
+        
+    # 强制清理重名的残留容器
+    os.system("docker kill microros_agent >/dev/null 2>&1 || true")
+    os.system("docker rm microros_agent >/dev/null 2>&1 || true")
+    
+    # 构建拉起串口代理的 Docker 命令，默认连接 /dev/ttyACM0
+    cmd = [
+        "docker", "run", "--name", "microros_agent", "--rm",
+        "-v", "/dev:/dev", "--privileged",
+        "microros/micro-ros-agent:humble",
+        "serial", "--dev", "/dev/ttyACM0", "-b", "921600"
+    ]
+    try:
+        agent_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        return {"status": "success", "message": "micro-ROS agent started successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start micro-ROS agent: {e}")
+
+@app.post("/api/v1/agent/stop")
+def stop_microros_agent():
+    """停止 micro-ROS 串口代理"""
+    global agent_process
+    try:
+        os.system("docker kill microros_agent >/dev/null 2>&1 || true")
+        if agent_process:
+            terminate_process_group(agent_process)
+            agent_process = None
+        return {"status": "success", "message": "micro-ROS agent stopped successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop micro-ROS agent: {e}")
+
+@app.get("/api/v1/agent/status")
+def get_microros_agent_status():
+    """获取 micro-ROS 代理的运行状态"""
+    res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
+    running = (res == 0)
+    return {"running": running}
+
 
 # 巡逻控制接口
 
@@ -381,16 +597,12 @@ def start_slam_mapping():
     """启动 SLAM 建图"""
     global slam_process, loc_process
     
-    # 1. 检查并确保定位节点（map_server/amcl）关闭，防止 TF 与 /map 冲突
+    # 1. 检查并确保定位节点（map_server/amcl）挂起，释放 /map 话题和 TF，防止冲突
     if loc_process and loc_process.poll() is None:
-        ros_node.get_logger().info("SLAM requested. Terminating active localization/map_server process...")
-        loc_process.terminate()
-        try:
-            loc_process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            loc_process.kill()
-        loc_process = None
+        ros_node.get_logger().info("SLAM requested. Pausing active localization nodes...")
+        ros_node.change_localization_manager_state(1) # PAUSE
 
+    # 2. 如果 SLAM 进程已经运行，直接返回
     if slam_process and slam_process.poll() is None:
         return {"status": "success", "message": "SLAM mapping is already running."}
     
@@ -401,8 +613,8 @@ def start_slam_mapping():
         f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup slam.launch.py use_sim_time:={sim_flag}"
     ]
     try:
-        slam_process = subprocess.Popen(cmd)
-        return {"status": "success", "message": "SLAM mapping node started successfully."}
+        slam_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        return {"status": "success", "message": "SLAM mapping node process started."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start SLAM: {e}")
 
@@ -414,13 +626,10 @@ def stop_slam_mapping():
         return {"status": "success", "message": "SLAM mapping is not running."}
     
     try:
-        slam_process.terminate()
-        try:
-            slam_process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            slam_process.kill()
+        ros_node.get_logger().info("Terminating slam_toolbox process group...")
+        terminate_process_group(slam_process)
         slam_process = None
-        return {"status": "success", "message": "SLAM mapping node stopped successfully."}
+        return {"status": "success", "message": "SLAM mapping process stopped successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to stop SLAM: {e}")
 
@@ -472,7 +681,7 @@ def start_autonomous_exploration():
         f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 run explore_lite explore --ros-args --params-file {explore_config}"
     ]
     try:
-        explore_process = subprocess.Popen(cmd)
+        explore_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
         return {"status": "success", "message": "Autonomous exploration started successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start exploration: {e}")
@@ -485,11 +694,7 @@ def stop_autonomous_exploration():
         return {"status": "success", "message": "Autonomous exploration is not running."}
     
     try:
-        explore_process.terminate()
-        try:
-            explore_process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            explore_process.kill()
+        terminate_process_group(explore_process)
         explore_process = None
         return {"status": "success", "message": "Autonomous exploration stopped successfully."}
     except Exception as e:
@@ -612,17 +817,13 @@ def load_map_into_navigation(map_name: str):
         
     # 1. 互斥安全检查：如果要加载静态地图定位导航，先关闭 SLAM 建图
     if slam_process and slam_process.poll() is None:
-        ros_node.get_logger().info("Map loading requested. Terminating active SLAM process...")
-        slam_process.terminate()
-        try:
-            slam_process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            slam_process.kill()
+        ros_node.get_logger().info("Map loading requested. Terminating active SLAM process group...")
+        terminate_process_group(slam_process)
         slam_process = None
 
     # 2. 检查并确保定位节点（map_server & amcl）已经启动
     if loc_process is None or loc_process.poll() is not None:
-        ros_node.get_logger().info("Starting localization (map_server & amcl) process...")
+        ros_node.get_logger().info("Starting localization (map_server & amcl) process group...")
         use_sim = check_use_sim_time(ros_node)
         sim_flag = "true" if use_sim else "false"
         cmd = [
@@ -630,11 +831,15 @@ def load_map_into_navigation(map_name: str):
             f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
         ]
         try:
-            loc_process = subprocess.Popen(cmd)
+            loc_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
             # 给服务 3 秒初始化时间，再尝试调用它的加载服务
             time.sleep(3.0)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start localization launch: {e}")
+    else:
+        # 如果定位进程已经在运行但处于挂起状态，恢复 map_server 和 amcl
+        ros_node.get_logger().info("Localization process already running. Resuming map_server & amcl...")
+        ros_node.change_localization_manager_state(2) # RESUME
 
     # 3. 检查服务是否就绪
     # 最多尝试等待 5 秒，直到服务可用
@@ -804,8 +1009,15 @@ def ros2_thread_entry():
     rclpy.shutdown()
 
 
+def sigterm_handler(signum, frame):
+    raise KeyboardInterrupt
+
+
 def main():
     global scheduler
+    
+    # 注册 SIGTERM 信号处理器，确保收到 SIGTERM 时能运行 finally 块清理进程组
+    signal.signal(signal.SIGTERM, sigterm_handler)
     
     # 1. 启动 ROS 2 守护子线程
     ros_thread = threading.Thread(target=ros2_thread_entry, daemon=True)
@@ -823,6 +1035,13 @@ def main():
     finally:
         if scheduler:
             scheduler.stop()
+        # 退出时彻底清理所有可能残留的后台进程组，防止僵尸进程
+        terminate_process_group(slam_process)
+        terminate_process_group(explore_process)
+        terminate_process_group(loc_process)
+        terminate_process_group(sim_process)
+        terminate_process_group(agent_process)
+        os.system("docker kill microros_agent >/dev/null 2>&1 || true")
 
 
 if __name__ == "__main__":

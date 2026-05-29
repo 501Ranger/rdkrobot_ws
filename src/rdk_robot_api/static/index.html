@@ -16,12 +16,16 @@
         <header class="app-header">
             <div class="brand">
                 <div class="logo-glow"></div>
-                <h1>RDK ROBOT <span>上位机控制舱</span></h1>
+                <h1>Dashboard <span>RDK ROBOT</span></h1>
             </div>
             <div class="header-status">
                 <div class="status-item">
                     <span class="label">API 连接:</span>
                     <span id="connection-status" class="status-badge offline">未连接</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">下位机状态:</span>
+                    <span id="mcu-status" class="status-badge offline">离线</span>
                 </div>
                 <div class="status-item battery-wrapper">
                     <span class="label">小车电量:</span>
@@ -70,6 +74,18 @@
                     <div class="card-header">
                         <h2>🔄 运行模式切换</h2>
                     </div>
+                    <div class="control-group simulation-group" id="simulation-group">
+                        <button class="btn btn-secondary" id="btn-start-sim">启动 Gazebo 仿真</button>
+                        <button class="btn btn-danger" id="btn-stop-sim">关闭 Gazebo 仿真</button>
+                    </div>
+                    <div class="divider simulation-divider" id="simulation-divider"></div>
+
+                    <!-- micro-ROS 代理控制 -->
+                    <div class="control-group agent-group" id="agent-group">
+                        <button class="btn btn-secondary" id="btn-start-agent">启动 micro-ROS 代理</button>
+                        <button class="btn btn-danger" id="btn-stop-agent">关闭 micro-ROS 代理</button>
+                    </div>
+                    <div class="divider agent-divider" id="agent-divider"></div>
                     <div class="control-group mode-switcher-btns">
                         <button class="btn btn-primary" id="btn-start-slam">开启 SLAM 建图</button>
                         <button class="btn btn-danger" id="btn-stop-slam">停止 SLAM 建图</button>

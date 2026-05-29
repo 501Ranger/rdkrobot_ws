@@ -33,11 +33,11 @@ def generate_launch_description():
         description='Full path to the Nav2 parameters file to use',
     )
 
-    # 包含 nav2_bringup 中的 localization_launch.py
-    # 它启动 map_server 和 amcl 节点及其生命周期管理
+    # 包含 nav2_bringup 中的 bringup_launch.py
+    # 它同时启动定位（map_server/amcl）与导航堆栈（planner/controller/bt_navigator 等）
     localization_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(nav2_bringup_share, 'launch', 'localization_launch.py')
+            os.path.join(nav2_bringup_share, 'launch', 'bringup_launch.py')
         ),
         launch_arguments={
             'use_sim_time': use_sim_time,

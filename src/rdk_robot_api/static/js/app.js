@@ -21,6 +21,9 @@ let dragStartY = 0;
 
 // DOM 载入完成后的初始化
 document.addEventListener("DOMContentLoaded", () => {
+    // 0. 检测系统环境是否为 ARM 以展示或隐藏仿真控制
+    checkSystemInfo();
+
     // 1. 初始化拉取数据
     refreshMapList();
     refreshScheduleList();
@@ -84,6 +87,9 @@ function startTelemetryPolling() {
                 
                 // 更新重定位状态
                 updateLocalizeStatusDisplay(data.is_localizing);
+
+                // 更新下位机在线状态
+                updateMcuStatus(data.mcu_online);
             })
             .catch(err => {
                 updateConnectionStatus(false);
@@ -127,6 +133,13 @@ function startNodeStatusPolling() {
                     btnStop.classList.add("hidden");
                 }
             }).catch(() => {});
+
+        // C. 查询 micro-ROS 代理状态
+        fetch(`${API_BASE}/api/v1/agent/status`)
+            .then(res => res.json())
+            .then(data => {
+                updateAgentButtonStates(data.running);
+            }).catch(() => {});
     };
 
     checkStatuses();
@@ -151,6 +164,7 @@ function updateConnectionStatus(isOnline) {
         document.getElementById("robot-marker").classList.add("hidden");
         updateLocalizeStatusDisplay(false);
         currentPose = null;
+        updateMcuStatus(false);
     }
 }
 
@@ -582,6 +596,56 @@ function setupEventListeners() {
 
     // J. 地图缩放平移交互
     setupMapInteraction();
+
+    // K. 仿真交互控制
+    const btnStartSim = document.getElementById("btn-start-sim");
+    const btnStopSim = document.getElementById("btn-stop-sim");
+    if (btnStartSim) {
+        btnStartSim.addEventListener("click", () => {
+            showToast("正在启动 Gazebo 仿真...", "info");
+            fetch(`${API_BASE}/api/v1/sim/start`, { method: "POST" })
+                .then(res => res.json())
+                .then(data => showToast("Gazebo 仿真启动成功", "success"))
+                .catch(() => showToast("启动 Gazebo 失败", "error"));
+        });
+    }
+    if (btnStopSim) {
+        btnStopSim.addEventListener("click", () => {
+            showToast("正在关闭 Gazebo 仿真...", "info");
+            fetch(`${API_BASE}/api/v1/sim/stop`, { method: "POST" })
+                .then(res => res.json())
+                .then(data => showToast("Gazebo 仿真已成功关闭", "success"))
+                .catch(() => showToast("关闭 Gazebo 失败", "error"));
+        });
+    }
+
+    // L. micro-ROS 代理交互控制
+    const btnStartAgent = document.getElementById("btn-start-agent");
+    const btnStopAgent = document.getElementById("btn-stop-agent");
+    if (btnStartAgent) {
+        btnStartAgent.addEventListener("click", () => {
+            showToast("正在启动 micro-ROS 代理...", "info");
+            fetch(`${API_BASE}/api/v1/agent/start`, { method: "POST" })
+                .then(res => res.json())
+                .then(data => {
+                    showToast("micro-ROS 代理启动成功", "success");
+                    updateAgentButtonStates(true);
+                })
+                .catch(() => showToast("启动 micro-ROS 代理失败", "error"));
+        });
+    }
+    if (btnStopAgent) {
+        btnStopAgent.addEventListener("click", () => {
+            showToast("正在关闭 micro-ROS 代理...", "info");
+            fetch(`${API_BASE}/api/v1/agent/stop`, { method: "POST" })
+                .then(res => res.json())
+                .then(data => {
+                    showToast("micro-ROS 代理已成功关闭", "success");
+                    updateAgentButtonStates(false);
+                })
+                .catch(() => showToast("关闭 micro-ROS 代理失败", "error"));
+        });
+    }
 }
 
 // 弹窗提示函数
@@ -772,5 +836,54 @@ function updateMapTransform() {
     // 地图缩放变化时，若小车在线，同步更新其逆向缩放比例以保持大小恒定
     if (currentPose) {
         updateRobotMarkerOnMap(currentPose);
+    }
+}
+
+// ==========================================
+// 10. 系统信息检测与下位机状态显示 (System info & MCU status)
+// ==========================================
+
+function checkSystemInfo() {
+    fetch(`${API_BASE}/api/v1/system/info`)
+        .then(res => res.json())
+        .then(data => {
+            const simGroup = document.getElementById("simulation-group");
+            const simDivider = document.getElementById("simulation-divider");
+            if (data.is_arm) {
+                if (simGroup) simGroup.classList.add("hidden");
+                if (simDivider) simDivider.classList.add("hidden");
+                console.log("Running on ARM board (RDK X5). Hiding simulation buttons.");
+            } else {
+                if (simGroup) simGroup.classList.remove("hidden");
+                if (simDivider) simDivider.classList.remove("hidden");
+                console.log("Running on non-ARM host. Showing simulation controls.");
+            }
+        })
+        .catch(err => console.error("Failed to query system info", err));
+}
+
+function updateMcuStatus(mcuOnline) {
+    const badge = document.getElementById("mcu-status");
+    if (!badge) return;
+    if (mcuOnline) {
+        badge.innerText = "在线";
+        badge.className = "status-badge online";
+    } else {
+        badge.innerText = "离线";
+        badge.className = "status-badge offline";
+    }
+}
+
+function updateAgentButtonStates(running) {
+    const btnStartAgent = document.getElementById("btn-start-agent");
+    const btnStopAgent = document.getElementById("btn-stop-agent");
+    if (btnStartAgent && btnStopAgent) {
+        if (running) {
+            btnStartAgent.disabled = true;
+            btnStopAgent.disabled = false;
+        } else {
+            btnStartAgent.disabled = false;
+            btnStopAgent.disabled = true;
+        }
     }
 }

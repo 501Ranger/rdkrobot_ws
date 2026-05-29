@@ -78,22 +78,26 @@ fi
 
 echo "✅ 资产下载成功！开始部署更新..."
 
-# 3. 备份旧的 install 部署包
+# 3. 创建备份 (对当前 install 进行快照备份)
 BACKUP_DIR="install_backup_$(date +%Y%m%d_%H%M%S)"
 if [ -d "install" ]; then
-    echo "📁 正在备份原有编译环境至: ${BACKUP_DIR}..."
-    mv install "${BACKUP_DIR}"
+    echo "📁 正在为原有编译环境创建快照备份至: ${BACKUP_DIR}..."
+    cp -r install "${BACKUP_DIR}"
 fi
 
-# 4. 解压最新的编译产物
-echo "📦 正在解压新二进制安装包..."
-tar -xzf install_arm64.tar.gz
+# 4. 解压最新的编译产物到临时目录
+echo "📦 正在解压新二进制安装包到临时目录..."
+mkdir -p install_arm64_temp
+tar -xzf install_arm64.tar.gz -C install_arm64_temp
 
-# 5. 对齐重命名
-echo "⚙️  重命名 install_arm64 部署目录为运行空间 install..."
-mv install_arm64 install
+# 5. 增量合并覆盖，不删除旧的第三方已编译包 (如 explore_lite, lslidar 驱动)
+echo "⚙️  正在将核心包增量覆盖至本地运行空间 install..."
+mkdir -p install
+# 复制解压出来的 install_arm64 文件夹内容合并到 install 目录
+cp -r install_arm64_temp/install_arm64/* install/
 
-# 6. 清理下载包缓存
+# 6. 清理临时目录与下载包
+rm -rf install_arm64_temp
 rm -f install_arm64.tar.gz
 
 # 7. 重启 api_server 后端进程

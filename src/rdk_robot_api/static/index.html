@@ -128,6 +128,47 @@
                         </ul>
                     </div>
                 </div>
+
+                <!-- 🎮 游戏手柄遥控中枢 -->
+                <div class="card glass-card">
+                    <div class="card-header">
+                        <h2>🎮 蓝牙手柄遥控</h2>
+                        <div class="pulse-dot" id="gamepad-pulse"></div>
+                    </div>
+                    <div class="gamepad-container" style="display: flex; flex-direction: column; gap: 12px;">
+                        <div class="gamepad-status-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <span class="gamepad-label" style="color: var(--text-secondary);">连接状态:</span>
+                            <span id="gamepad-status-badge" class="status-badge offline">未连接</span>
+                        </div>
+                        <div class="gamepad-info-row hidden" id="gamepad-info-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <span class="gamepad-label" style="color: var(--text-secondary);">设备型号:</span>
+                            <span id="gamepad-model" class="gamepad-val" style="color: var(--accent-cyan); font-weight: 600; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; text-align: right;">-</span>
+                        </div>
+                        <div class="gamepad-control-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <span class="gamepad-label" style="color: var(--text-secondary);">手柄使能开关:</span>
+                            <label class="switch">
+                                <input type="checkbox" id="gamepad-enable-switch">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        
+                        <!-- 摇杆可视化偏置指示盘 -->
+                        <div class="gamepad-joystick-visualizer">
+                            <div class="joystick-ring">
+                                <div class="joystick-axis-x"></div>
+                                <div class="joystick-axis-y"></div>
+                                <div class="joystick-pointer" id="joystick-pointer"></div>
+                            </div>
+                            <div class="joystick-labels">
+                                <span>线速度 (X轴)</span>
+                                <span>角速度 (Yaw轴)</span>
+                            </div>
+                        </div>
+                        <div class="map-hint" style="margin-top: 5px; font-size: 0.72rem; line-height: 1.35;">
+                            💡 先在系统蓝牙设置中连接 Xbox 手柄，随后按手柄任意键激活连接。
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- 中/右栏：地图可视化与语义导航 -->

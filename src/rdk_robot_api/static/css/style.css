@@ -1430,4 +1430,127 @@ body {
     color: var(--accent-cyan) !important;
 }
 
+/* ==========================================
+ * 游戏手柄滑动开关与可视化摇杆指示盘 (Gamepad Controls & Switch)
+ * ========================================== */
 
+/* 滑动开关 (Toggle Switch) */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 22px;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--input-bg);
+    border: 1px solid var(--input-border);
+    transition: .3s;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--text-secondary);
+    transition: .3s;
+}
+input:checked + .slider {
+    background-color: var(--accent-cyan-glow);
+    border-color: var(--accent-cyan);
+}
+input:checked + .slider:before {
+    transform: translateX(22px);
+    background-color: var(--accent-cyan);
+    box-shadow: 0 0 8px var(--accent-cyan);
+}
+.slider.round {
+    border-radius: 22px;
+}
+.slider.round:before {
+    border-radius: 50%;
+}
+
+/* 摇杆可视化偏置指示盘 */
+.gamepad-joystick-visualizer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--panel-border);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    margin-top: 5px;
+    width: 100%;
+}
+.joystick-ring {
+    width: 100px;
+    height: 100px;
+    border: 2px solid var(--text-muted);
+    border-radius: 50%;
+    position: relative;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.3) 100%);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.6);
+}
+.joystick-axis-x, .joystick-axis-y {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.08);
+}
+.joystick-axis-x {
+    width: 100%;
+    height: 1px;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+}
+.joystick-axis-y {
+    height: 100%;
+    width: 1px;
+    left: 50%;
+    top: 0;
+    transform: translateX(-50%);
+}
+.joystick-pointer {
+    width: 14px;
+    height: 14px;
+    background-color: var(--text-secondary);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: background-color 0.2s, box-shadow 0.2s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+/* 当手柄被激活并且使能打开时的指示点发光效果 */
+.joystick-active .joystick-ring {
+    border-color: var(--accent-cyan);
+    background: radial-gradient(circle, var(--accent-cyan-glow) 0%, rgba(0, 0, 0, 0.3) 100%);
+    box-shadow: 0 0 8px var(--accent-cyan-glow);
+}
+.joystick-active .joystick-pointer {
+    background-color: var(--accent-cyan);
+    box-shadow: 0 0 12px var(--accent-cyan), 0 0 4px var(--accent-cyan);
+}
+.joystick-labels {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+    padding: 0 10px;
+}

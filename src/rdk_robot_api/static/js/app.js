@@ -23,6 +23,8 @@ let dragStartY = 0;
 document.addEventListener("DOMContentLoaded", () => {
     // 00. 初始化页面配色主题
     initTheme();
+    // 000. 初始化游戏手柄遥控监听与连接自动轮询
+    initGamepad();
 
     // 0. 检测系统环境是否为 ARM 以展示或隐藏仿真控制
     checkSystemInfo();
@@ -1499,9 +1501,217 @@ function toggleTheme() {
         if (btn) btn.innerText = "🌙";
         showToast("已切换至深色科技模式", "success");
     } else {
-        document.documentElement.setAttribute("data-theme", "light");
-        localStorage.setItem("theme", "light");
         if (btn) btn.innerText = "☀️";
         showToast("已切换至高雅浅色模式", "success");
+    }
+}
+
+// ==========================================
+// 11. 蓝牙游戏手柄遥控交互 (Gamepad Bluetooth HMI)
+// ==========================================
+
+let gamepadIndex = null;
+let gamepadEnabled = false;
+let gamepadLoopActive = false;
+let zeroSpeedSentCount = 0;
+
+function initGamepad() {
+    // 1. 监听手柄硬件拔插事件
+    window.addEventListener("gamepadconnected", (e) => {
+        console.log("Gamepad connected to slot:", e.gamepad.index, e.gamepad.id);
+        gamepadIndex = e.gamepad.index;
+        updateGamepadUIStatus(e.gamepad);
+        startGamepadLoop();
+    });
+
+    window.addEventListener("gamepaddisconnected", (e) => {
+        if (gamepadIndex === e.gamepad.index) {
+            console.log("Gamepad disconnected from slot:", e.gamepad.index);
+            gamepadIndex = null;
+            updateGamepadUIStatus(null);
+            stopGamepadLoop();
+        }
+    });
+
+    // 2. 绑定 HMI 界面上的手柄安全使能开关
+    const enableSwitch = document.getElementById("gamepad-enable-switch");
+    if (enableSwitch) {
+        enableSwitch.addEventListener("change", (e) => {
+            gamepadEnabled = e.target.checked;
+            const visualizer = document.querySelector(".gamepad-joystick-visualizer");
+            
+            if (gamepadEnabled) {
+                if (gamepadIndex !== null) {
+                    if (visualizer) visualizer.classList.add("joystick-active");
+                    showToast("🎮 手柄遥控已开启，请操纵摇杆", "success");
+                } else {
+                    // 若无手柄，强行弹回开关，防止误导
+                    enableSwitch.checked = false;
+                    gamepadEnabled = false;
+                    showToast("⚠️ 未检测到已连手柄！请先按键激活手柄。", "error");
+                }
+            } else {
+                if (visualizer) visualizer.classList.remove("joystick-active");
+                showToast("🎮 手柄遥控已安全关闭", "info");
+                // 安全刹车：关闭使能时立即发送 0 速度，确保小车停下
+                sendGamepadTeleopCommand(0.0, 0.0);
+            }
+        });
+    }
+
+    // 3. 自动连接重试定时器：无需每次手动拔插，只要检测到有设备连接且有按键按下便自动激活
+    setInterval(() => {
+        if (gamepadIndex !== null) return;
+        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+        for (let i = 0; i < gamepads.length; i++) {
+            if (gamepads[i]) {
+                console.log("Auto-detected gamepad at slot", i, gamepads[i].id);
+                gamepadIndex = gamepads[i].index;
+                updateGamepadUIStatus(gamepads[i]);
+                startGamepadLoop();
+                break;
+            }
+        }
+    }, 1000);
+}
+
+function updateGamepadUIStatus(gamepad) {
+    const badge = document.getElementById("gamepad-status-badge");
+    const infoRow = document.getElementById("gamepad-info-row");
+    const modelSpan = document.getElementById("gamepad-model");
+    const pulse = document.getElementById("gamepad-pulse");
+    const visualizer = document.querySelector(".gamepad-joystick-visualizer");
+
+    if (gamepad) {
+        if (badge) {
+            badge.innerText = "已连接";
+            badge.className = "status-badge online";
+        }
+        if (infoRow) infoRow.classList.remove("hidden");
+        if (modelSpan) {
+            // 清理型号字符串，去除杂乱的厂商 ID，保持整洁
+            modelSpan.innerText = gamepad.id.split(" (Vendor:")[0];
+        }
+        if (pulse) {
+            pulse.className = "pulse-dot active";
+        }
+    } else {
+        if (badge) {
+            badge.innerText = "未连接";
+            badge.className = "status-badge offline";
+        }
+        if (infoRow) infoRow.classList.add("hidden");
+        if (pulse) {
+            pulse.className = "pulse-dot";
+        }
+        if (visualizer) {
+            visualizer.classList.remove("joystick-active");
+        }
+        const enableSwitch = document.getElementById("gamepad-enable-switch");
+        if (enableSwitch) {
+            enableSwitch.checked = false;
+        }
+        gamepadEnabled = false;
+        // 复位摇杆球指针
+        updateJoystickPointerVisual(0.0, 0.0);
+    }
+}
+
+function startGamepadLoop() {
+    if (!gamepadLoopActive) {
+        gamepadLoopActive = true;
+        requestAnimationFrame(gamepadTelemetryLoop);
+    }
+}
+
+function stopGamepadLoop() {
+    gamepadLoopActive = false;
+}
+
+let teleopFrameCounter = 0;
+function gamepadTelemetryLoop() {
+    if (gamepadIndex === null) {
+        gamepadLoopActive = false;
+        return;
+    }
+
+    const gamepad = navigator.getGamepads()[gamepadIndex];
+    if (gamepad) {
+        // Xbox 标准协议映射：
+        // 左摇杆上下 (axes[1]) -> 控制前进后退。向上推为负，向下为正，故取反
+        let rawLinear = -gamepad.axes[1];
+        
+        // 转向优先使用右摇杆左右 (axes[2]/axes[3])，若无则使用左摇杆左右 (axes[0])
+        let rawAngular = 0.0;
+        if (typeof gamepad.axes[3] !== 'undefined' && Math.abs(gamepad.axes[3]) > 0.05) {
+            rawAngular = -gamepad.axes[3];
+        } else if (typeof gamepad.axes[2] !== 'undefined' && Math.abs(gamepad.axes[2]) > 0.05) {
+            rawAngular = -gamepad.axes[2];
+        } else if (typeof gamepad.axes[0] !== 'undefined') {
+            rawAngular = -gamepad.axes[0];
+        }
+
+        // 摇杆中位滤波死区 (Deadzone)：过滤摇杆轻微机械松动带来的微小读数
+        const deadzone = 0.15;
+        let linear = Math.abs(rawLinear) < deadzone ? 0.0 : rawLinear;
+        let angular = Math.abs(rawAngular) < deadzone ? 0.0 : rawAngular;
+
+        // 物理上限约束映射：线速度最大 0.45 m/s，角速度最大 1.20 rad/s
+        const maxLinear = 0.45;
+        const maxAngular = 1.20;
+        
+        let linearX = linear * maxLinear;
+        let angularZ = angular * maxAngular;
+
+        // 实时更新摇杆的可视化偏移小点，传入原始偏置
+        updateJoystickPointerVisual(linear, -angular);
+
+        if (gamepadEnabled) {
+            teleopFrameCounter++;
+            // 降频机制：限流为每 4 帧发送一次速度，约合 15Hz (60fps / 4)
+            if (teleopFrameCounter % 4 === 0) {
+                sendGamepadTeleopCommand(linearX, angularZ);
+            }
+        }
+    }
+
+    if (gamepadLoopActive) {
+        requestAnimationFrame(gamepadTelemetryLoop);
+    }
+}
+
+function updateJoystickPointerVisual(linear, angular) {
+    const pointer = document.getElementById("joystick-pointer");
+    if (!pointer) return;
+
+    // 指示盘极限像素移动范围为 40px
+    const maxOffset = 40;
+    const offsetX = angular * maxOffset;
+    const offsetY = -linear * maxOffset; // 向上偏表示前进，在屏幕Y坐标上表示负偏移
+
+    pointer.style.transform = `translate(calc(-50% + ${offsetX.toFixed(1)}px), calc(-50% + ${offsetY.toFixed(1)}px))`;
+}
+
+function sendGamepadTeleopCommand(linearX, angularZ) {
+    // 零速过滤：如果连续发零，发送 3 次零速度（安全刹车确认）后就不再下发，防止浪费网路队列带宽
+    if (linearX === 0.0 && angularZ === 0.0) {
+        if (zeroSpeedSentCount >= 3) {
+            return;
+        }
+        zeroSpeedSentCount++;
+    } else {
+        zeroSpeedSentCount = 0;
+    }
+
+    console.log(`[Gamepad Teleop] 准备发送速度: x=${linearX.toFixed(3)}, z=${angularZ.toFixed(3)}`);
+
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: "teleop",
+            linear_x: parseFloat(linearX.toFixed(3)),
+            angular_z: parseFloat(angularZ.toFixed(3))
+        }));
+    } else {
+        console.warn(`[Gamepad Teleop] WebSocket 未连接或处于非开启状态，无法下发控制命令。当前 WebSocket 状态: ${socket ? socket.readyState : 'null'}`);
     }
 }

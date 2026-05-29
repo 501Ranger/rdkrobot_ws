@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from rclpy.action import ActionClient
 from std_msgs.msg import String, Bool
-from geometry_msgs.msg import PoseArray, Pose
+from geometry_msgs.msg import PoseArray, Pose, Twist
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import BatteryState
 from nav_msgs.msg import Odometry, Path
@@ -28,6 +28,7 @@ class RobotApiNode(Node):
         # 发布者
         self.patrol_cmd_pub = self.create_publisher(String, "/patrol/cmd", 10)
         self.waypoints_pub = self.create_publisher(PoseArray, "/patrol/set_waypoints", 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
 
         # 订阅者
         self.battery_sub = self.create_subscription(
@@ -265,3 +266,9 @@ class RobotApiNode(Node):
             self.nav2_path = []
             return True
         return False
+
+    def publish_cmd_vel(self, linear_x: float, angular_z: float):
+        msg = Twist()
+        msg.linear.x = linear_x
+        msg.angular.z = angular_z
+        self.cmd_vel_pub.publish(msg)

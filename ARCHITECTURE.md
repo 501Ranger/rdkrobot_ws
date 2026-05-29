@@ -71,6 +71,7 @@ HMI 服务端在后台维护一个 ROS 2 守护线程，运行中介节点 `Robo
 ### 发布的 ROS 2 话题
 - `/patrol/cmd` (`std_msgs/msg/String`) -> 下发巡逻控制指令。
 - `/patrol/set_waypoints` (`geometry_msgs/PoseArray`) -> 批量下发规划的航点数组。
+- `/cmd_vel` (`geometry_msgs/Twist`) -> 下发底盘运动速度指令（线速度与角速度），高频响应游戏手柄操控。
 
 ### 调用的 ROS 2 Action 动作
 - `navigate_to_pose` (`nav2_msgs/action/NavigateToPose`) -> 驱动机器人前往目标点。
@@ -83,7 +84,7 @@ HMI 服务端在后台维护一个 ROS 2 守护线程，运行中介节点 `Robo
 
 ### 4.1 状态通信双轨容错机制
 为了保证不同局域网及反代环境下通信的 100% 连通性，采用双轨推送架构：
-1. **高频 WebSocket (10Hz)**：建立于 `/ws/status`，后台协程每 100ms 广播一次合并后的状态包（包含位姿、电量、以及 SLAM/Explore/Agent/Sim 各进程运行状态）。
+1. **高频 WebSocket (10Hz)**：建立于 `/ws/status`，后台协程每 100ms 广播一次合并后的状态包（包含位姿、电量、以及 SLAM/Explore/Agent/Sim 各进程运行状态）。同时，它升级为双向信道，支持接收前端 15Hz 高频发送的 `{ "type": "teleop", "linear_x": ..., "angular_z": ... }` 游戏手柄遥控指令。
 2. **容错 HTTP 轮询**：若 WebSocket 连接连续握手失败 3 次，前端自动无缝降级为 1.5 秒/次的 HTTP 轮询模式，访问后端统一的 `/api/v1/robot/status` API，保障页面状态与交互绝不卡死。
 
 ### 4.2 SVG 多轨地图绘制 (SVG Overlay)
@@ -93,3 +94,4 @@ HMI 服务端在后台维护一个 ROS 2 守护线程，运行中介节点 `Robo
 - **航线规划路径（青色实线及编号标记）**：在地图上点击取点生成的航点序列。支持向后端 `/api/v1/nav/preview` 请求基于 Nav2 的真实避障规划，以青色曲线精细绘制；若 Nav2 算路服务不可用，则自动降级为传统直线连接。
 - **滑屏拖拽防误触**：移动端单指拖拽平移地图时，若位移大于 5 像素，松开时会自动屏蔽点击取点事件，防止误触导航。
 - **深色/浅色主题双轨切换**：Header 支持 🌙/☀️ 切换键，浅色皮肤具备精美白色毛玻璃质感，主题选择信息由 LocalStorage 持久化存储。
+- **XBOX 蓝牙手柄遥控**：支持标准 XBOX 协议蓝牙手柄，通过网页端使能控制，配有高频防抖中位刹车限流算法，以及摇杆偏移可视化十字坐标指示盘。

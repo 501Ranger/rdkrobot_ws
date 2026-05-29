@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 
@@ -22,8 +23,20 @@ async def websocket_endpoint(websocket: WebSocket):
     await m.manager.connect(websocket)
     try:
         while True:
-            # 维持连接与接收心跳/任何客户端消息
-            await websocket.receive_text()
+            # 接收文本帧，如果是 JSON 则尝试解析为遥控数据
+            text_data = await websocket.receive_text()
+            if text_data in ("ping", "heartbeat"):
+                continue
+            try:
+                data = json.loads(text_data)
+                if isinstance(data, dict) and data.get("type") == "teleop":
+                    linear_x = float(data.get("linear_x", 0.0))
+                    angular_z = float(data.get("angular_z", 0.0))
+                    print(f"[WS Teleop] 收到手柄指令: x={linear_x:.3f}, z={angular_z:.3f}, ROS节点有效={rn.ros_node is not None}")
+                    if rn.ros_node:
+                        rn.ros_node.publish_cmd_vel(linear_x, angular_z)
+            except json.JSONDecodeError:
+                pass
     except WebSocketDisconnect:
         m.manager.disconnect(websocket)
     except Exception:

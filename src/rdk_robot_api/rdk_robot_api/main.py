@@ -12,8 +12,9 @@ from io import BytesIO
 from datetime import datetime
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,7 +27,7 @@ from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PoseArray, Pose
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import BatteryState
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 from nav2_msgs.srv import LoadMap, ManageLifecycleNodes
 from nav2_msgs.action import NavigateToPose
 from ament_index_python.packages import get_package_share_directory
@@ -67,6 +68,93 @@ except Exception:
 
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir, follow_symlink=True), name="static")
+
+# 加载统一配置 robot_params.yaml
+robot_config = {}
+try:
+    api_share = get_package_share_directory('rdk_robot_api')
+    config_path = os.path.join(api_share, 'config', 'robot_params.yaml')
+except Exception:
+    config_path = "/home/ranger/rdkrobot_ws/src/rdk_robot_api/config/robot_params.yaml"
+
+if os.path.exists(config_path):
+    try:
+        with open(config_path, 'r') as f:
+            robot_config = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"Error loading robot_params.yaml: {e}")
+
+# WebSocket 连接管理器
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+manager = ConnectionManager()
+
+async def broadcast_status_loop():
+    while True:
+        if ros_node:
+            try:
+                current_time = time.time()
+                mcu_online = (current_time - ros_node.last_battery_time < 3.0) or \
+                             (current_time - ros_node.last_odom_time < 3.0)
+                
+                slam_running = (slam_process is not None) and (slam_process.poll() is None)
+                explore_running = (explore_process is not None) and (explore_process.poll() is None)
+                
+                # 检测 micro-ROS 代理是否在运行
+                agent_res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
+                agent_running = (agent_res == 0) or ((agent_process is not None) and (agent_process.poll() is None))
+                
+                sim_running = (sim_process is not None) and (sim_process.poll() is None)
+                
+                status_data = {
+                    "battery_percentage": round(ros_node.battery_pct, 1),
+                    "pose": ros_node.robot_pose,
+                    "is_localizing": ros_node.is_localizing,
+                    "nav_status": ros_node.nav_status,
+                    "mcu_online": mcu_online,
+                    "slam_running": slam_running,
+                    "explore_running": explore_running,
+                    "agent_running": agent_running,
+                    "sim_running": sim_running,
+                    "nav2_plan": ros_node.nav2_path
+                }
+                await manager.broadcast(status_data)
+            except Exception:
+                pass
+        await asyncio.sleep(0.1) # 10Hz 频率广播
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(broadcast_status_loop())
+
+@app.websocket("/ws/status")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # 维持连接与接收心跳/任何客户端消息
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
 
 @app.get("/", response_class=HTMLResponse)
 def read_index():
@@ -131,6 +219,9 @@ class RobotApiNode(Node):
         self.localize_status_sub = self.create_subscription(
             Bool, "/auto_localize/status", self.localize_status_callback, qos
         )
+        self.nav2_path_sub = self.create_subscription(
+            Path, "/plan", self.nav2_path_callback, 10
+        )
 
         # 服务客户端
         self.localize_cli = self.create_client(Trigger, "/trigger_auto_localize")
@@ -143,6 +234,7 @@ class RobotApiNode(Node):
         self.battery_pct = 0.0
         self.robot_pose = {"x": 0.0, "y": 0.0, "yaw": 0.0}
         self.is_localizing = False
+        self.nav2_path = []
         
         # 导航相关变量
         self.current_nav_goal_handle = None
@@ -175,6 +267,21 @@ class RobotApiNode(Node):
 
     def localize_status_callback(self, msg: Bool):
         self.is_localizing = msg.data
+
+    def nav2_path_callback(self, msg: Path):
+        poses = msg.poses
+        total_points = len(poses)
+        max_points = 150
+        step = max(1, total_points // max_points)
+        
+        path_pts = []
+        for i in range(0, total_points, step):
+            pos = poses[i].pose.position
+            path_pts.append({
+                "x": round(pos.x, 3),
+                "y": round(pos.y, 3)
+            })
+        self.nav2_path = path_pts
 
     def change_lifecycle_state(self, node_name: str, transition_id: int) -> bool:
         """调用 ROS 2 Lifecycle 服务更改节点运行状态"""
@@ -332,12 +439,14 @@ class RobotApiNode(Node):
         else:
             self.nav_status = "failed"
 
+        self.nav2_path = []
         self.current_nav_goal_handle = None
 
     def cancel_navigation_goal(self):
         if self.current_nav_goal_handle:
             self.get_logger().info("Canceling current active navigation goal...")
             self.current_nav_goal_handle.cancel_goal_async()
+            self.nav2_path = []
             return True
         return False
 
@@ -397,7 +506,7 @@ def get_system_info():
 
 @app.get("/api/v1/robot/status")
 def get_robot_status():
-    """获取小车电池、位姿等实时状态以及下位机在线状态"""
+    """获取小车电池、位姿等实时状态以及下位机在线状态，包含进程状态"""
     if not ros_node:
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
     
@@ -406,12 +515,23 @@ def get_robot_status():
     mcu_online = (current_time - ros_node.last_battery_time < 3.0) or \
                  (current_time - ros_node.last_odom_time < 3.0)
                  
+    slam_running = (slam_process is not None) and (slam_process.poll() is None)
+    explore_running = (explore_process is not None) and (explore_process.poll() is None)
+    agent_res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
+    agent_running = (agent_res == 0) or ((agent_process is not None) and (agent_process.poll() is None))
+    sim_running = (sim_process is not None) and (sim_process.poll() is None)
+
     return {
         "battery_percentage": round(ros_node.battery_pct, 1),
         "pose": ros_node.robot_pose,
         "is_localizing": ros_node.is_localizing,
         "nav_status": ros_node.nav_status,
-        "mcu_online": mcu_online
+        "mcu_online": mcu_online,
+        "slam_running": slam_running,
+        "explore_running": explore_running,
+        "agent_running": agent_running,
+        "sim_running": sim_running,
+        "nav2_plan": ros_node.nav2_path
     }
 
 # Gazebo 仿真控制接口
@@ -472,16 +592,21 @@ def start_microros_agent():
     os.system("docker kill microros_agent >/dev/null 2>&1 || true")
     os.system("docker rm microros_agent >/dev/null 2>&1 || true")
     
-    # 构建拉起串口代理的 Docker 命令，默认连接 /dev/ttyACM0
+    # 从统一配置文件读取串口和波特率，若读取失败则使用默认值
+    agent_cfg = robot_config.get("agent", {})
+    serial_port = agent_cfg.get("serial_port", "/dev/ttyACM0")
+    baud_rate = str(agent_cfg.get("baud_rate", 921600))
+    
+    # 构建拉起串口代理的 Docker 命令
     cmd = [
         "docker", "run", "--name", "microros_agent", "--rm",
         "-v", "/dev:/dev", "--privileged",
         "microros/micro-ros-agent:humble",
-        "serial", "--dev", "/dev/ttyACM0", "-b", "921600"
+        "serial", "--dev", serial_port, "-b", baud_rate
     ]
     try:
         agent_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
-        return {"status": "success", "message": "micro-ROS agent started successfully."}
+        return {"status": "success", "message": f"micro-ROS agent started successfully on {serial_port}."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start micro-ROS agent: {e}")
 

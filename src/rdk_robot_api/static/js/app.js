@@ -27,123 +27,438 @@ document.addEventListener("DOMContentLoaded", () => {
     // 1. 初始化拉取数据
     refreshMapList();
     refreshScheduleList();
+    refreshMapGallery();
     
-    // 2. 开启状态查询轮询 (1秒一次实时数据看板)
-    startTelemetryPolling();
-    // 3. 开启高层节点（SLAM、探索）的状态轮询 (3秒一次)
-    startNodeStatusPolling();
+    // 2. 初始化标签页与 WebSocket 实时推送
+    initTabs();
+    initWebSocket();
 
-    // 4. 绑定事件监听
+    // 3. 绑定事件监听
     setupEventListeners();
 });
 
 // ==========================================
-// 1. 状态轮询逻辑 (Status Polling)
+// 1. 状态轮询与 WebSocket 逻辑 (Status Polling & WS)
 // ==========================================
 
-function startTelemetryPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    
-    const poll = () => {
-        fetch(`${API_BASE}/api/v1/robot/status`)
-            .then(res => {
-                if (!res.ok) throw new Error("Offline");
-                return res.json();
-            })
-            .then(data => {
-                updateConnectionStatus(true);
-                
-                // 更新位姿
-                document.getElementById("pose-x").innerText = `${data.pose.x.toFixed(3)} m`;
-                document.getElementById("pose-y").innerText = `${data.pose.y.toFixed(3)} m`;
-                
-                // 弧度转角度
-                const deg = (data.pose.yaw * 180 / Math.PI).toFixed(1);
-                document.getElementById("pose-yaw").innerText = `${deg}°`;
-                
-                // 导航状态
-                const navStatusEl = document.getElementById("nav-status");
-                const navStatus = data.nav_status ? data.nav_status.toUpperCase() : "IDLE";
-                navStatusEl.innerText = navStatus;
-                
-                // 改变状态文字颜色
-                navStatusEl.className = "tel-val status-text";
-                if (navStatus === "NAVIGATING") {
-                    navStatusEl.style.color = "#00d8ff"; // 蓝色
-                } else if (navStatus === "REACHED") {
-                    navStatusEl.style.color = "#10b981"; // 绿色
-                } else if (navStatus === "FAILED") {
-                    navStatusEl.style.color = "#ef4444"; // 红色
-                } else {
-                    navStatusEl.style.color = "#f59e0b"; // 橙色
-                }
+let socket = null;
+let waypointList = [];
+let dragSourceElement = null;
+let pollTimer = null;
+let wsFailures = 0;
+const MAX_WS_FAILURES = 3;
+let usingWebSocket = false;
+let robotTrajectory = [];
+const MAX_TRAJECTORY_POINTS = 500;
+let showTrajectory = true;
 
-                // 更新电量
-                updateBatteryDisplay(data.battery_percentage);
-                
-                // 更新小车在地图上的位置
-                currentPose = data.pose;
-                updateRobotMarkerOnMap(currentPose);
-                
-                // 更新重定位状态
-                updateLocalizeStatusDisplay(data.is_localizing);
+function initWebSocket() {
+    if (socket) {
+        try { socket.close(); } catch(e) {}
+    }
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/status`);
 
-                // 更新下位机在线状态
-                updateMcuStatus(data.mcu_online);
-            })
-            .catch(err => {
-                updateConnectionStatus(false);
-            });
+    socket.onopen = () => {
+        console.log("WebSocket connected.");
+        wsFailures = 0;
+        usingWebSocket = true;
+        updateConnectionStatus(true);
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
     };
 
-    poll(); // 先执行一次
-    pollInterval = setInterval(poll, 1000);
+    socket.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            updateTelemetry(data);
+        } catch (e) {
+            console.error("Error parsing WebSocket JSON data:", e);
+        }
+    };
+
+    socket.onclose = () => {
+        console.log("WebSocket connection closed.");
+        usingWebSocket = false;
+        wsFailures++;
+        
+        if (wsFailures >= MAX_WS_FAILURES) {
+            console.warn("WebSocket failed repeatedly. Falling back to HTTP polling.");
+            updateConnectionStatus(false);
+            startHttpPolling();
+        } else {
+            updateConnectionStatus(false);
+            setTimeout(initWebSocket, 2000);
+        }
+    };
+
+    socket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        socket.close();
+    };
 }
 
-function startNodeStatusPolling() {
-    if (statusInterval) clearInterval(statusInterval);
+function startHttpPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollStatusHttp();
+    pollTimer = setInterval(pollStatusHttp, 1500);
+}
+
+function pollStatusHttp() {
+    if (usingWebSocket) return;
     
-    const checkStatuses = () => {
-        // A. 查询 SLAM 状态
-        fetch(`${API_BASE}/api/v1/slam/status`)
-            .then(res => res.json())
-            .then(data => {
-                const btnStart = document.getElementById("btn-start-slam");
-                const btnStop = document.getElementById("btn-stop-slam");
-                if (data.running) {
-                    btnStart.classList.add("hidden");
-                    btnStop.classList.remove("hidden");
-                } else {
-                    btnStart.classList.remove("hidden");
-                    btnStop.classList.add("hidden");
-                }
-            }).catch(() => {});
+    fetch(`${API_BASE}/api/v1/robot/status`)
+        .then(res => {
+            if (!res.ok) throw new Error("HTTP status check failed");
+            return res.json();
+        })
+        .then(data => {
+            updateTelemetry(data);
+            updateConnectionStatus(true);
+        })
+        .catch(err => {
+            console.error("HTTP Status polling failed:", err);
+            updateConnectionStatus(false);
+        });
+}
 
-        // B. 查询自主探索状态
-        fetch(`${API_BASE}/api/v1/explore/status`)
-            .then(res => res.json())
-            .then(data => {
-                const btnStart = document.getElementById("btn-start-explore");
-                const btnStop = document.getElementById("btn-stop-explore");
-                if (data.running) {
-                    btnStart.classList.add("hidden");
-                    btnStop.classList.remove("hidden");
-                } else {
-                    btnStart.classList.remove("hidden");
-                    btnStop.classList.add("hidden");
-                }
-            }).catch(() => {});
+function updateTelemetry(data) {
+    updateConnectionStatus(true);
+    
+    // 更新位姿
+    if (data.pose) {
+        document.getElementById("pose-x").innerText = `${data.pose.x.toFixed(3)} m`;
+        document.getElementById("pose-y").innerText = `${data.pose.y.toFixed(3)} m`;
+        const deg = (data.pose.yaw * 180 / Math.PI).toFixed(1);
+        document.getElementById("pose-yaw").innerText = `${deg}°`;
+        
+        currentPose = data.pose;
+        updateRobotMarkerOnMap(currentPose);
+    }
+    
+    // 更新 Nav2 全局规划路线
+    if (data.nav2_plan) {
+        drawNav2Path(data.nav2_plan);
+    } else {
+        drawNav2Path([]);
+    }
+    
+    // 导航状态
+    const navStatusEl = document.getElementById("nav-status");
+    const navStatus = data.nav_status ? data.nav_status.toUpperCase() : "IDLE";
+    navStatusEl.innerText = navStatus;
+    
+    // 改变状态文字颜色
+    navStatusEl.className = "tel-val status-text";
+    if (navStatus === "NAVIGATING") {
+        navStatusEl.style.color = "#00d8ff"; // 蓝色
+    } else if (navStatus === "REACHED") {
+        navStatusEl.style.color = "#10b981"; // 绿色
+    } else if (navStatus === "FAILED") {
+        navStatusEl.style.color = "#ef4444"; // 红色
+    } else {
+        navStatusEl.style.color = "#f59e0b"; // 橙色
+    }
 
-        // C. 查询 micro-ROS 代理状态
-        fetch(`${API_BASE}/api/v1/agent/status`)
-            .then(res => res.json())
-            .then(data => {
-                updateAgentButtonStates(data.running);
-            }).catch(() => {});
-    };
+    // 更新电量
+    updateBatteryDisplay(data.battery_percentage);
+    
+    // 更新重定位状态
+    updateLocalizeStatusDisplay(data.is_localizing);
 
-    checkStatuses();
-    statusInterval = setInterval(checkStatuses, 3000);
+    // 更新下位机在线状态
+    updateMcuStatus(data.mcu_online);
+
+    // 更新 SLAM 按钮状态
+    const btnStartSlam = document.getElementById("btn-start-slam");
+    const btnStopSlam = document.getElementById("btn-stop-slam");
+    if (data.slam_running) {
+        btnStartSlam.classList.add("hidden");
+        btnStopSlam.classList.remove("hidden");
+    } else {
+        btnStartSlam.classList.remove("hidden");
+        btnStopSlam.classList.add("hidden");
+    }
+
+    // 更新自主探索按钮状态
+    const btnStartExplore = document.getElementById("btn-start-explore");
+    const btnStopExplore = document.getElementById("btn-stop-explore");
+    if (data.explore_running) {
+        btnStartExplore.classList.add("hidden");
+        btnStopExplore.classList.remove("hidden");
+    } else {
+        btnStartExplore.classList.remove("hidden");
+        btnStopExplore.classList.add("hidden");
+    }
+
+    // 更新 micro-ROS 代理按钮状态
+    updateAgentButtonStates(data.agent_running);
+
+    // 更新 Gazebo 仿真按钮状态
+    const btnStartSim = document.getElementById("btn-start-sim");
+    const btnStopSim = document.getElementById("btn-stop-sim");
+    if (btnStartSim && btnStopSim) {
+        if (data.sim_running) {
+            btnStartSim.classList.add("hidden");
+            btnStopSim.classList.remove("hidden");
+        } else {
+            btnStartSim.classList.remove("hidden");
+            btnStopSim.classList.add("hidden");
+        }
+    }
+}
+
+function initTabs() {
+    const tabButtons = document.querySelectorAll(".tab-button");
+    const tabPanes = document.querySelectorAll(".tab-pane");
+
+    tabButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const targetTab = btn.getAttribute("data-tab");
+
+            // Deactivate all buttons
+            tabButtons.forEach(b => b.classList.remove("active"));
+            // Activate current button
+            btn.classList.add("active");
+
+            // Hide all panes
+            tabPanes.forEach(pane => pane.classList.add("hidden"));
+            // Show target pane
+            document.getElementById(targetTab).classList.remove("hidden");
+        });
+    });
+}
+
+function addWaypointToList(x, y, yaw) {
+    waypointList.push({ x, y, yaw });
+    renderWaypointList();
+    showToast(`添加航点成功: WP${waypointList.length} (${x.toFixed(2)}, ${y.toFixed(2)})`, "success");
+}
+
+function renderWaypointList() {
+    const listEl = document.getElementById("waypoint-list");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    
+    if (waypointList.length === 0) {
+        listEl.innerHTML = '<li class="empty-list-text">暂无航点，请在上方切换“添加航点”并在地图上点击</li>';
+        drawPlannedPath();
+        return;
+    }
+    
+    waypointList.forEach((wp, index) => {
+        const li = document.createElement("li");
+        li.className = "waypoint-item";
+        li.setAttribute("draggable", "true");
+        li.setAttribute("data-index", index);
+        
+        li.innerHTML = `
+            <span class="wp-index">${index + 1}</span>
+            <span class="wp-coords">X: ${wp.x.toFixed(3)} | Y: ${wp.y.toFixed(3)} | Yaw: ${wp.yaw.toFixed(2)}</span>
+            <div class="wp-actions">
+                <button class="btn-move-wp btn-move-up" title="上移" ${index === 0 ? 'disabled' : ''}>▲</button>
+                <button class="btn-move-wp btn-move-down" title="下移" ${index === waypointList.length - 1 ? 'disabled' : ''}>▼</button>
+                <button class="btn-remove-wp" title="删除当前点">&times;</button>
+            </div>
+        `;
+        
+        // Move up/down buttons
+        const btnUp = li.querySelector(".btn-move-up");
+        const btnDown = li.querySelector(".btn-move-down");
+        if (btnUp) {
+            btnUp.addEventListener("click", (e) => {
+                e.stopPropagation();
+                moveWaypoint(index, -1);
+            });
+        }
+        if (btnDown) {
+            btnDown.addEventListener("click", (e) => {
+                e.stopPropagation();
+                moveWaypoint(index, 1);
+            });
+        }
+        
+        // Remove button event
+        li.querySelector(".btn-remove-wp").addEventListener("click", (e) => {
+            e.stopPropagation();
+            removeWaypoint(index);
+        });
+        
+        // Drag and drop event listeners
+        li.addEventListener("dragstart", handleDragStart);
+        li.addEventListener("dragover", handleDragOver);
+        li.addEventListener("drop", handleDrop);
+        li.addEventListener("dragend", handleDragEnd);
+        
+        listEl.appendChild(li);
+    });
+    
+    drawPlannedPath();
+}
+
+function removeWaypoint(index) {
+    waypointList.splice(index, 1);
+    renderWaypointList();
+}
+
+function moveWaypoint(index, direction) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= waypointList.length) return;
+    const temp = waypointList[index];
+    waypointList[index] = waypointList[targetIndex];
+    waypointList[targetIndex] = temp;
+    renderWaypointList();
+}
+
+function handleDragStart(e) {
+    this.classList.add("dragging");
+    dragSourceElement = this;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/html", this.innerHTML);
+}
+
+function handleDragOver(e) {
+    if (e.preventDefault) {
+        e.preventDefault();
+    }
+    e.dataTransfer.dropEffect = "move";
+    return false;
+}
+
+function handleDrop(e) {
+    e.stopPropagation();
+    
+    if (dragSourceElement !== this) {
+        const fromIndex = parseInt(dragSourceElement.getAttribute("data-index"), 10);
+        const toIndex = parseInt(this.getAttribute("data-index"), 10);
+        
+        // Reorder array
+        const temp = waypointList[fromIndex];
+        waypointList.splice(fromIndex, 1);
+        waypointList.splice(toIndex, 0, temp);
+        
+        renderWaypointList();
+    }
+    return false;
+}
+
+function handleDragEnd(e) {
+    this.classList.remove("dragging");
+    const items = document.querySelectorAll(".waypoint-item");
+    items.forEach(item => item.classList.remove("dragging"));
+}
+
+function startWaypointPatrol() {
+    if (waypointList.length === 0) {
+        showToast("航点列表不能为空，请先添加航点", "error");
+        return;
+    }
+    
+    showToast("正在下发路径规划点位并启动巡逻...", "info");
+    
+    fetch(`${API_BASE}/api/v1/patrol/task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ waypoints: waypointList })
+    })
+    .then(res => {
+        if (!res.ok) throw new Error("下发路径失败");
+        return res.json();
+    })
+    .then(() => {
+        return fetch(`${API_BASE}/api/v1/patrol/cmd`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cmd: "start" })
+        });
+    })
+    .then(res => {
+        if (!res.ok) throw new Error("启动巡逻失败");
+        return res.json();
+    })
+    .then(() => {
+        showToast("多点巡逻启动成功！机器人已出发！", "success");
+    })
+    .catch(err => {
+        showToast(err.message || "启动巡逻失败，请检查服务状态", "error");
+    });
+}
+
+function refreshMapGallery() {
+    const galleryEl = document.getElementById("map-gallery");
+    if (!galleryEl) return;
+    
+    fetch(`${API_BASE}/api/v1/maps`)
+        .then(res => res.json())
+        .then(data => {
+            galleryEl.innerHTML = "";
+            if (data.length === 0) {
+                galleryEl.innerHTML = '<div class="empty-list-text">暂无历史地图，请在左侧建图并保存</div>';
+                return;
+            }
+            
+            data.forEach(map => {
+                const card = document.createElement("div");
+                card.className = "gallery-map-card";
+                
+                const imageUrl = `${API_BASE}/api/v1/maps/${map.name}/image`;
+                const dateStr = map.created_at || '未知时间';
+                const resolutionStr = map.resolution ? `${map.resolution.toFixed(3)} m/px` : '未知';
+                
+                card.innerHTML = `
+                    <div class="gallery-map-preview">
+                        <img src="${imageUrl}" alt="${map.name}" onerror="this.src='/static/css/images/map_fallback.png';">
+                    </div>
+                    <div class="gallery-map-info">
+                        <div class="gallery-map-name" title="${map.name}">${map.name}</div>
+                        <div class="gallery-map-meta">📅 创建: ${dateStr}</div>
+                        <div class="gallery-map-meta">📏 分辨率: ${resolutionStr}</div>
+                        <div class="gallery-map-actions">
+                            <button class="btn btn-primary btn-load-gallery-map">加载</button>
+                            <button class="btn btn-danger btn-delete-gallery-map">删除</button>
+                        </div>
+                    </div>
+                `;
+                
+                card.querySelector(".btn-load-gallery-map").addEventListener("click", () => {
+                    const select = document.getElementById("map-select");
+                    select.value = map.name;
+                    loadSelectedMap();
+                    showToast(`正在从图库加载地图 '${map.name}'...`, "info");
+                });
+                
+                card.querySelector(".btn-delete-gallery-map").addEventListener("click", () => {
+                    if (confirm(`⚠️ 警告: 您确定要永久删除地图 '${map.name}' 的所有文件吗？此操作无法撤销！`)) {
+                        deleteGalleryMap(map.name);
+                    }
+                });
+                
+                galleryEl.appendChild(card);
+            });
+        })
+        .catch(() => {
+            galleryEl.innerHTML = '<div class="empty-list-text">加载图库失败，请检查网络</div>';
+        });
+}
+
+function deleteGalleryMap(mapName) {
+    fetch(`${API_BASE}/api/v1/maps/${mapName}`, {
+        method: "DELETE"
+    })
+    .then(res => {
+        if (!res.ok) throw new Error();
+        return res.json();
+    })
+    .then(() => {
+        showToast(`地图 '${mapName}' 已成功删除`, "success");
+        refreshMapList();
+        refreshMapGallery();
+    })
+    .catch(() => {
+        showToast(`删除地图 '${mapName}' 失败`, "error");
+    });
 }
 
 function updateConnectionStatus(isOnline) {
@@ -252,6 +567,11 @@ function loadSelectedMap() {
                 panX = 0;
                 panY = 0;
                 updateMapTransform();
+                
+                // 重置小车历史轨迹并清空显示
+                robotTrajectory = [];
+                drawTrajectory();
+                drawPlannedPath();
             };
             
             // 拉取这个地图的 POI 列表
@@ -299,12 +619,17 @@ function handleMapClick(e) {
     const worldX = originX + (pixelX * resolution);
     const worldY = originY + ((naturalHeight - pixelY) * resolution);
 
-    // 填入输入框
-    document.getElementById("poi-x").value = worldX.toFixed(3);
-    document.getElementById("poi-y").value = worldY.toFixed(3);
-    document.getElementById("poi-yaw").value = "0.000"; // 默认朝向设为 0
-    
-    showToast(`提取坐标成功: X=${worldX.toFixed(3)}, Y=${worldY.toFixed(3)}`, "success");
+    // 检查当前点击模式
+    const clickMode = document.querySelector('input[name="map-click-mode"]:checked')?.value || "nav";
+    if (clickMode === "waypoint") {
+        addWaypointToList(worldX, worldY, 0.0);
+    } else {
+        // 单点导航模式：填入输入框并高亮提示
+        document.getElementById("poi-x").value = worldX.toFixed(3);
+        document.getElementById("poi-y").value = worldY.toFixed(3);
+        document.getElementById("poi-yaw").value = "0.000"; // 默认朝向设为 0
+        showToast(`提取坐标成功: X=${worldX.toFixed(3)}, Y=${worldY.toFixed(3)}`, "success");
+    }
 }
 
 // ==========================================
@@ -517,7 +842,6 @@ function setupEventListeners() {
             .then(res => res.json())
             .then(data => {
                 showToast("已下发开启 SLAM 指令", "success");
-                startNodeStatusPolling();
             });
     });
     
@@ -526,7 +850,6 @@ function setupEventListeners() {
             .then(res => res.json())
             .then(data => {
                 showToast("已下发停止 SLAM 指令", "success");
-                startNodeStatusPolling();
             });
     });
 
@@ -550,6 +873,7 @@ function setupEventListeners() {
             showToast(`地图 '${mapName}' 保存成功！`, "success");
             document.getElementById("input-map-name").value = "";
             refreshMapList();
+            refreshMapGallery();
         })
         .catch(() => showToast("保存地图失败，确认 SLAM 是否开启", "error"));
     });
@@ -560,7 +884,6 @@ function setupEventListeners() {
             .then(res => res.json())
             .then(data => {
                 showToast("自主探索建图已开启", "success");
-                startNodeStatusPolling();
             });
     });
 
@@ -569,7 +892,6 @@ function setupEventListeners() {
             .then(res => res.json())
             .then(data => {
                 showToast("自主探索建图已关闭", "success");
-                startNodeStatusPolling();
             });
     });
 
@@ -646,6 +968,45 @@ function setupEventListeners() {
                 .catch(() => showToast("关闭 micro-ROS 代理失败", "error"));
         });
     }
+
+    // M. 多点航线规划按键
+    document.getElementById("btn-clear-waypoints").addEventListener("click", () => {
+        waypointList = [];
+        renderWaypointList();
+        showToast("已清除规划路径中的所有点", "info");
+    });
+    document.getElementById("btn-start-waypoint-patrol").addEventListener("click", startWaypointPatrol);
+
+    // N. 历史地图库刷新按键
+    const btnRefreshGallery = document.getElementById("btn-refresh-gallery");
+    if (btnRefreshGallery) {
+        btnRefreshGallery.addEventListener("click", refreshMapGallery);
+    }
+
+    // O. 小车轨迹控制按键
+    const btnToggleTraj = document.getElementById("btn-toggle-trajectory");
+    if (btnToggleTraj) {
+        btnToggleTraj.addEventListener("click", () => {
+            showTrajectory = !showTrajectory;
+            if (showTrajectory) {
+                btnToggleTraj.classList.add("active-tool");
+                showToast("已开启小车轨迹显示", "success");
+            } else {
+                btnToggleTraj.classList.remove("active-tool");
+                showToast("已隐藏小车轨迹显示", "info");
+            }
+            drawTrajectory();
+        });
+    }
+
+    const btnClearTraj = document.getElementById("btn-clear-trajectory");
+    if (btnClearTraj) {
+        btnClearTraj.addEventListener("click", () => {
+            robotTrajectory = [];
+            drawTrajectory();
+            showToast("已清空小车历史轨迹", "info");
+        });
+    }
 }
 
 // 弹窗提示函数
@@ -694,6 +1055,12 @@ function updateRobotMarkerOnMap(pose) {
         return;
     }
 
+    // 更新 SVG ViewBox
+    const svg = document.getElementById("map-svg-overlay");
+    if (svg) {
+        svg.setAttribute("viewBox", `0 0 ${naturalWidth} ${naturalHeight}`);
+    }
+
     const resolution = currentMap.resolution; // 米/像素
     const originX = currentMap.origin[0];     // 图像左下角的 ROS X 物理坐标
     const originY = currentMap.origin[1];     // 图像左下角的 ROS Y 物理坐标
@@ -721,6 +1088,111 @@ function updateRobotMarkerOnMap(pose) {
     } else {
         marker.classList.add("hidden");
     }
+
+    // 记录历史轨迹点，若静止则不重复记录
+    if (robotTrajectory.length === 0) {
+        robotTrajectory.push({ x: pose.x, y: pose.y });
+        drawTrajectory();
+    } else {
+        const lastPt = robotTrajectory[robotTrajectory.length - 1];
+        const dist = Math.hypot(pose.x - lastPt.x, pose.y - lastPt.y);
+        if (dist > 0.03) { // 移动超过3厘米记录一次
+            robotTrajectory.push({ x: pose.x, y: pose.y });
+            if (robotTrajectory.length > MAX_TRAJECTORY_POINTS) {
+                robotTrajectory.shift();
+            }
+            drawTrajectory();
+        }
+    }
+}
+
+function drawTrajectory() {
+    const polyline = document.getElementById("trajectory-path");
+    const img = document.getElementById("map-image");
+    if (!polyline || !img || !currentMap || img.classList.contains("hidden")) return;
+    
+    if (!showTrajectory || robotTrajectory.length === 0) {
+        polyline.setAttribute("points", "");
+        return;
+    }
+    
+    const naturalHeight = img.naturalHeight;
+    const resolution = currentMap.resolution;
+    const originX = currentMap.origin[0];
+    const originY = currentMap.origin[1];
+    
+    let pointsStr = "";
+    robotTrajectory.forEach(pt => {
+        const px = (pt.x - originX) / resolution;
+        const py = naturalHeight - ((pt.y - originY) / resolution);
+        pointsStr += `${px.toFixed(1)},${py.toFixed(1)} `;
+    });
+    polyline.setAttribute("points", pointsStr.trim());
+}
+
+function drawPlannedPath() {
+    const polyline = document.getElementById("planned-path");
+    const group = document.getElementById("waypoint-markers-group");
+    const img = document.getElementById("map-image");
+    if (!polyline || !group || !img || !currentMap || img.classList.contains("hidden")) return;
+    
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    const resolution = currentMap.resolution;
+    const originX = currentMap.origin[0];
+    const originY = currentMap.origin[1];
+    
+    group.innerHTML = "";
+    let pointsStr = "";
+    
+    waypointList.forEach((wp, index) => {
+        const px = (wp.x - originX) / resolution;
+        const py = naturalHeight - ((wp.y - originY) / resolution);
+        pointsStr += `${px.toFixed(1)},${py.toFixed(1)} `;
+        
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", px);
+        circle.setAttribute("cy", py);
+        const r = 8 / zoomScale;
+        circle.setAttribute("r", r);
+        circle.setAttribute("class", "svg-wp-marker");
+        
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", px);
+        text.setAttribute("y", py);
+        text.setAttribute("class", "svg-wp-text");
+        text.setAttribute("font-size", `${10 / zoomScale}px`);
+        text.textContent = index + 1;
+        
+        group.appendChild(circle);
+        group.appendChild(text);
+    });
+    
+    polyline.setAttribute("points", pointsStr.trim());
+}
+
+function drawNav2Path(path) {
+    const polyline = document.getElementById("nav2-path");
+    const img = document.getElementById("map-image");
+    if (!polyline || !img || !currentMap || img.classList.contains("hidden")) return;
+    
+    if (!path || path.length === 0) {
+        polyline.setAttribute("points", "");
+        return;
+    }
+    
+    const naturalHeight = img.naturalHeight;
+    const resolution = currentMap.resolution;
+    const originX = currentMap.origin[0];
+    const originY = currentMap.origin[1];
+    
+    let pointsStr = "";
+    path.forEach(pt => {
+        const px = (pt.x - originX) / resolution;
+        const py = naturalHeight - ((pt.y - originY) / resolution);
+        pointsStr += `${px.toFixed(1)},${py.toFixed(1)} `;
+    });
+    polyline.setAttribute("points", pointsStr.trim());
 }
 
 function updateLocalizeStatusDisplay(isLocalizing) {
@@ -805,6 +1277,41 @@ function setupMapInteraction() {
         isDragging = false;
         innerContainer.classList.remove("dragging");
     });
+
+    // 手机端触摸拖拽平移
+    innerContainer.addEventListener("touchstart", (e) => {
+        if (!currentMap) return;
+        if (e.touches.length !== 1) return; // 仅允许单指拖拽
+        isDragging = true;
+        hasDragged = false;
+        innerContainer.classList.add("dragging");
+        
+        const touch = e.touches[0];
+        dragStartX = touch.clientX;
+        dragStartY = touch.clientY;
+        startX = touch.clientX - panX;
+        startY = touch.clientY - panY;
+    }, { passive: true });
+    
+    window.addEventListener("touchmove", (e) => {
+        if (!isDragging) return;
+        if (e.touches.length !== 1) return;
+        
+        const touch = e.touches[0];
+        panX = touch.clientX - startX;
+        panY = touch.clientY - startY;
+        
+        if (Math.hypot(touch.clientX - dragStartX, touch.clientY - dragStartY) > 5) {
+            hasDragged = true;
+        }
+        updateMapTransform();
+    }, { passive: true });
+    
+    window.addEventListener("touchend", () => {
+        if (!isDragging) return;
+        isDragging = false;
+        innerContainer.classList.remove("dragging");
+    });
     
     // 缩放按钮绑定
     document.getElementById("btn-zoom-in").addEventListener("click", () => {
@@ -837,6 +1344,7 @@ function updateMapTransform() {
     if (currentPose) {
         updateRobotMarkerOnMap(currentPose);
     }
+    drawPlannedPath();
 }
 
 // ==========================================

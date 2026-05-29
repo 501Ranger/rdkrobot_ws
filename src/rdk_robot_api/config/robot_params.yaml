@@ -1,0 +1,13 @@
+# RDK Robot 统一参数配置文件
+
+agent:
+  serial_port: "/dev/ttyACM0"      # micro-ROS 代理串口号 (默认: /dev/ttyACM0)
+  baud_rate: 921600                # micro-ROS 代理波特率 (默认: 921600)
+
+lidar:
+  serial_port: "/dev/ttyUSB0"      # 雷达驱动串口号 (默认: /dev/ttyUSB0)
+  device_ip: "192.168.1.200"       # 雷达目的 IP (默认: 192.168.1.200)
+  device_ip_difop: "192.168.1.102" # 雷达源 IP (默认: 192.168.1.102)
+  frame_id: "laser_frame"          # 雷达坐标系名称 (默认: laser_frame)
+  scan_topic: "/scan"              # 雷达数据发布话题 (默认: /scan)
+  frequency: 10.0                  # 雷达扫描频率/帧率 (Hz) (默认: 10.0)

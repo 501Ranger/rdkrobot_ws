@@ -920,4 +920,470 @@ body {
     transition: none; /* Disable transition during drag for smoothness */
 }
 
+/* Card Tabs System */
+.tabs-header {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+}
+
+.tab-buttons {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+}
+
+.tab-button {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 10px 14px;
+    border-radius: 8px 8px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    border-bottom: none;
+}
+
+.tab-button.active {
+    background: var(--panel-bg);
+    color: var(--accent-cyan);
+    border-color: rgba(0, 216, 255, 0.2);
+    border-bottom: 2px solid var(--accent-cyan);
+    box-shadow: 0 -4px 10px rgba(0, 216, 255, 0.05);
+}
+
+.tab-button:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+}
+
+.tab-content-container {
+    padding-top: 10px;
+}
+
+.tab-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* Route Mode Selector */
+.route-mode-selector {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 10px 14px;
+    border-radius: 8px;
+}
+
+.mode-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.mode-options {
+    display: flex;
+    gap: 12px;
+}
+
+.mode-opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.mode-opt input[type="radio"] {
+    cursor: pointer;
+    accent-color: var(--accent-cyan);
+}
+
+/* Waypoint planning list */
+.waypoint-list-section h3 {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.waypoint-list-container {
+    max-height: 180px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.waypoint-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.waypoint-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: grab;
+    user-select: none;
+    transition: var(--transition);
+}
+
+.waypoint-item:active {
+    cursor: grabbing;
+}
+
+.waypoint-item.dragging {
+    opacity: 0.4;
+    background: rgba(0, 216, 255, 0.1);
+    border: 1px dashed var(--accent-cyan);
+}
+
+.waypoint-item:hover:not(.dragging) {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.waypoint-item .wp-index {
+    background: var(--accent-cyan-glow);
+    color: var(--accent-cyan);
+    font-weight: 700;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 0.72rem;
+    border: 1px solid rgba(0, 216, 255, 0.2);
+}
+
+.waypoint-item .wp-coords {
+    font-family: monospace;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.waypoint-item .btn-remove-wp {
+    background: transparent;
+    border: none;
+    color: var(--accent-red);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 4px;
+    transition: var(--transition);
+}
+
+.waypoint-item .btn-remove-wp:hover {
+    color: #ff3b3b;
+    transform: scale(1.1);
+}
+
+.route-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.route-buttons .btn {
+    flex: 1;
+}
+
+/* Map Gallery Layout */
+.map-gallery-card {
+    margin-top: 10px;
+}
+
+.gallery-header {
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.map-gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 15px;
+    max-height: 380px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.gallery-map-card {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: var(--transition);
+    height: 240px;
+}
+
+.gallery-map-card:hover {
+    border-color: rgba(0, 216, 255, 0.2);
+    box-shadow: 0 4px 20px rgba(0, 216, 255, 0.05);
+    transform: translateY(-2px);
+}
+
+.gallery-map-preview {
+    height: 120px;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.gallery-map-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.gallery-map-info {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-grow: 1;
+}
+
+.gallery-map-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gallery-map-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.gallery-map-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.gallery-map-actions .btn {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 0.72rem;
+    border-radius: 4px;
+}
+
+/* 航点列表操作按钮及定位 */
+.wp-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-move-wp {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: var(--transition);
+}
+
+.btn-move-wp:hover:not(:disabled) {
+    color: var(--accent-cyan);
+    background: rgba(0, 216, 255, 0.1);
+}
+
+.btn-move-wp:disabled {
+    color: var(--text-muted);
+    opacity: 0.25;
+    cursor: not-allowed;
+}
+
+/* 移动端与平板响应式适配 */
+@media (max-width: 992px) {
+    .app-container {
+        padding: 10px;
+        gap: 12px;
+    }
+    
+    .app-header {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 12px;
+        padding: 12px 16px;
+    }
+    
+    .brand {
+        justify-content: center;
+    }
+    
+    .header-status {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px 16px;
+        width: 100%;
+    }
+    
+    .app-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    /* 核心技术：在移动端将容器平铺开，使子卡片成为 .app-grid 的直接子代以支持 order 属性 */
+    .grid-column {
+        display: contents;
+    }
+    
+    /* 重新定义各卡片在移动端从上至下的排序 */
+    .column-left > .card:nth-child(1) { order: 1; }  /* 📡 实时运行看板 */
+    .column-right > .map-card { order: 2; }          /* 🗺️ 导航地图中枢 */
+    .column-left > .card:nth-child(2) { order: 3; }  /* 🔄 运行模式切换 */
+    .double-grid { order: 4; }                       /* POI 标定、导航、历史地图的容器 */
+    .column-left > .card:nth-child(3) { order: 5; }  /* 📅 定时巡逻配置 */
+    
+    .double-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    /* 针对 .double-grid 内部卡片重新排序：让导航优先于标定 */
+    .double-grid > .card:nth-child(2) { order: 1; }  /* 📍 标记点导航/多点航线规划 */
+    .double-grid > .card:nth-child(1) { order: 2; }  /* 📍 语义点 (POI) 标定 */
+    .double-grid > .map-gallery-card { order: 3; }   /* 📂 历史地图预览与管理 */
+    
+    /* 地图头部选择器拉伸与折行 */
+    .map-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    
+    .map-selector-wrapper {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+    
+    .map-selector-wrapper .form-select {
+        flex-grow: 1;
+        max-width: none;
+    }
+    
+    /* 自适应地图高度 */
+    .map-image-wrapper {
+        min-height: 320px;
+        height: 350px;
+    }
+    
+    /* 巡逻指令按钮改为 2x2 网格，更利于手指触控 */
+    .patrol-btn-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+    
+    .patrol-btn-grid .btn {
+        padding: 10px 6px;
+        font-size: 0.8rem;
+    }
+    
+    /* 提示气泡自适应屏幕宽度 */
+    .toast {
+        width: 90%;
+        max-width: 400px;
+        padding: 10px 16px;
+        font-size: 0.8rem;
+    }
+}
+
+/* 针对超窄手机视口的微调 */
+@media (max-width: 480px) {
+    .coords-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .coords-row div {
+        width: 100%;
+    }
+}
+
+/* 地图 SVG 路径绘制层样式 */
+.map-svg-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 90;
+}
+
+.path-line {
+    fill: none;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+
+/* 实时历史轨迹线：虚线绿色 */
+.trajectory-line {
+    stroke: var(--accent-green);
+    stroke-width: 2px;
+    stroke-dasharray: 4, 4;
+    opacity: 0.8;
+}
+
+/* 规划航点航线：实线青色 */
+.planned-line {
+    stroke: var(--accent-cyan);
+    stroke-width: 3px;
+    opacity: 0.9;
+}
+
+/* 规划点位的 SVG 标记圆圈 */
+.svg-wp-marker {
+    fill: var(--accent-cyan);
+    stroke: #08090d;
+    stroke-width: 1.5px;
+}
+
+/* 规划点位的 SVG 索引序号文字 */
+.svg-wp-text {
+    fill: #000;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: central;
+    font-family: monospace;
+}
+
+/* Nav2 规划路径样式：深紫色/紫红色实线 */
+.nav2-path-line {
+    stroke: var(--accent-purple);
+    stroke-width: 3px;
+    opacity: 0.85;
+}
+
+/* 工具栏选中状态样式 */
+.btn-tool.active-tool {
+    background: var(--accent-cyan-glow) !important;
+    border-color: var(--accent-cyan) !important;
+    color: var(--accent-cyan) !important;
+}
+
 

@@ -150,15 +150,23 @@
                                 <button class="btn-tool" id="btn-zoom-in" title="放大">➕</button>
                                 <button class="btn-tool" id="btn-zoom-out" title="缩小">➖</button>
                                 <button class="btn-tool" id="btn-zoom-reset" title="重置">🏠</button>
+                                <button class="btn-tool active-tool" id="btn-toggle-trajectory" title="显示/隐藏小车轨迹">👣</button>
+                                <button class="btn-tool" id="btn-clear-trajectory" title="清除小车轨迹">🧹</button>
                             </div>
-                            
-                            <div id="map-inner-container" class="map-inner-container hidden">
-                                <img id="map-image" src="" alt="等待地图加载..." class="map-img-element">
-                                <div id="robot-marker" class="robot-marker hidden">
-                                    <div class="arrow"></div>
-                                </div>
-                            </div>
-                            <div id="map-loading" class="map-loader hidden">
+                             
+                             <div id="map-inner-container" class="map-inner-container hidden">
+                                 <img id="map-image" src="" alt="等待地图加载..." class="map-img-element">
+                                 <svg id="map-svg-overlay" class="map-svg-overlay">
+                                     <polyline id="trajectory-path" class="path-line trajectory-line" points=""></polyline>
+                                     <polyline id="nav2-path" class="path-line nav2-path-line" points=""></polyline>
+                                     <polyline id="planned-path" class="path-line planned-line" points=""></polyline>
+                                     <g id="waypoint-markers-group"></g>
+                                 </svg>
+                                 <div id="robot-marker" class="robot-marker hidden">
+                                     <div class="arrow"></div>
+                                 </div>
+                             </div>
+                             <div id="map-loading" class="map-loader hidden">
                                 <div class="spinner"></div>
                                 <span>正在转换并加载 PGM 图像...</span>
                             </div>
@@ -202,33 +210,79 @@
                         </div>
                     </div>
 
-                    <!-- 语义点列表与巡逻控制 -->
+                    <!-- 语义点列表与巡逻/航线规划控制 -->
                     <div class="card glass-card">
-                        <div class="card-header">
-                            <h2>🚀 语义点导航 & 巡逻控制</h2>
+                        <div class="card-header tabs-header">
+                            <div class="tab-buttons">
+                                <button class="tab-button active" data-tab="tab-pois">📍 标记点导航</button>
+                                <button class="tab-button" data-tab="tab-route">🗺️ 多点航线规划</button>
+                            </div>
                         </div>
-                        <div class="tab-content">
-                            <div class="poi-list-section">
-                                <h3>当前地图已标记语义点:</h3>
-                                <div class="poi-list-container">
-                                    <ul class="poi-list" id="poi-list">
-                                        <li class="empty-list-text">暂无已存标记点</li>
-                                    </ul>
+                        <div class="tab-content-container">
+                            <!-- POI 导航 & 巡逻 -->
+                            <div class="tab-pane" id="tab-pois">
+                                <div class="poi-list-section">
+                                    <h3>当前地图已标记语义点:</h3>
+                                    <div class="poi-list-container">
+                                        <ul class="poi-list" id="poi-list">
+                                            <li class="empty-list-text">暂无已存标记点</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="divider"></div>
+                                <div class="patrol-control-section">
+                                    <h3>巡逻指令中枢:</h3>
+                                    <div class="patrol-btn-grid">
+                                        <button class="btn btn-primary" id="btn-patrol-start">启动巡逻</button>
+                                        <button class="btn btn-warning" id="btn-patrol-pause">暂停</button>
+                                        <button class="btn btn-primary" id="btn-patrol-resume">继续</button>
+                                        <button class="btn btn-danger" id="btn-patrol-stop">终止</button>
+                                    </div>
+                                </div>
+                                <div class="nav-cancel-section">
+                                    <button class="btn btn-danger btn-block" id="btn-nav-cancel">🚨 紧急中止当前导航</button>
                                 </div>
                             </div>
-                            <div class="divider"></div>
-                            <div class="patrol-control-section">
-                                <h3>巡逻指令中枢:</h3>
-                                <div class="patrol-btn-grid">
-                                    <button class="btn btn-primary" id="btn-patrol-start">启动巡逻</button>
-                                    <button class="btn btn-warning" id="btn-patrol-pause">暂停</button>
-                                    <button class="btn btn-primary" id="btn-patrol-resume">继续</button>
-                                    <button class="btn btn-danger" id="btn-patrol-stop">终止</button>
+
+                            <!-- 多点航线规划 -->
+                            <div class="tab-pane hidden" id="tab-route">
+                                <div class="route-mode-selector">
+                                    <span class="mode-label">地图点击模式:</span>
+                                    <div class="mode-options">
+                                        <label class="mode-opt">
+                                            <input type="radio" name="map-click-mode" value="nav" checked>
+                                            <span>单点导航</span>
+                                        </label>
+                                        <label class="mode-opt">
+                                            <input type="radio" name="map-click-mode" value="waypoint">
+                                            <span>添加航点</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="waypoint-list-section">
+                                    <h3>待规划航点列表 (可上下拖拽排序):</h3>
+                                    <div class="waypoint-list-container">
+                                        <ul class="waypoint-list" id="waypoint-list">
+                                            <li class="empty-list-text">暂无航点，请在上方切换“添加航点”并在地图上点击</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="form-buttons route-buttons">
+                                    <button class="btn btn-danger" id="btn-clear-waypoints">🧹 清除路径</button>
+                                    <button class="btn btn-success" id="btn-start-waypoint-patrol">🚀 启动巡逻</button>
                                 </div>
                             </div>
-                            <div class="nav-cancel-section">
-                                <button class="btn btn-danger btn-block" id="btn-nav-cancel">🚨 紧急中止当前导航</button>
-                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 📂 历史地图预览与管理 -->
+                    <div class="card glass-card map-gallery-card">
+                        <div class="card-header gallery-header">
+                            <h2>📂 历史地图预览与管理</h2>
+                            <button class="btn btn-secondary btn-icon-refresh" id="btn-refresh-gallery">🔄 刷新地图库</button>
+                        </div>
+                        <div class="map-gallery-grid" id="map-gallery">
+                            <div class="empty-list-text">正在加载历史地图...</div>
                         </div>
                     </div>
                 </div>

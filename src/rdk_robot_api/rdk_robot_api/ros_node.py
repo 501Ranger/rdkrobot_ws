@@ -12,6 +12,7 @@ from nav_msgs.msg import Odometry, Path
 from nav2_msgs.srv import LoadMap, ManageLifecycleNodes
 from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from lifecycle_msgs.srv import ChangeState
+from std_msgs.msg import Header
 
 from .models import WaypointPayload
 
@@ -51,6 +52,11 @@ class RobotApiNode(Node):
         self.patrol_cmd_pub = self.create_publisher(String, "/patrol/cmd", 10)
         self.waypoints_pub = self.create_publisher(PoseArray, "/patrol/set_waypoints", 10)
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        # AMCL 初始位姿发布者（Transient Local 保证 AMCL 节点即使稍后上线也能收到）
+        self.initialpose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, "/initialpose", 
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        )
 
         # 订阅者
         self.battery_sub = self.create_subscription(
@@ -215,6 +221,26 @@ class RobotApiNode(Node):
         else:
             self.get_logger().error(f"Failed to change localization manager state.")
             return False
+
+    def publish_initial_pose(self, x: float = 0.0, y: float = 0.0, yaw: float = 0.0):
+        """
+        向 /initialpose 发布位姿，使 AMCL 开始发布 map->odom TF 变换。
+        默认以地图原点 (0, 0, 0) 作为初始猜测值，用户可在实际场景中重定位修正。
+        """
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.pose.pose.position.x = x
+        msg.pose.pose.position.y = y
+        msg.pose.pose.position.z = 0.0
+        msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        # 较大协方差，表明初始位姿不确定性高，AMCL 会在整个地图范围内搜索粒子
+        msg.pose.covariance[0]  = 0.5   # x 方差
+        msg.pose.covariance[7]  = 0.5   # y 方差
+        msg.pose.covariance[35] = 0.3   # yaw 方差
+        self.initialpose_pub.publish(msg)
+        self.get_logger().info(f"Published initial pose to AMCL: x={x:.2f}, y={y:.2f}, yaw={yaw:.2f}")
 
     def publish_patrol_cmd(self, cmd: str):
         msg = String()

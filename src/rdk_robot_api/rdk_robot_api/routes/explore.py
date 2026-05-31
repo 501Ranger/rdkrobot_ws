@@ -5,6 +5,8 @@ from ament_index_python.packages import get_package_share_directory
 
 from .. import manager as m
 
+from ..config import WORKSPACE_SETUP_BASH
+
 router = APIRouter(prefix="/api/v1/explore", tags=["Exploration"])
 
 @router.post("/start")
@@ -17,11 +19,15 @@ def start_autonomous_exploration():
         bringup_share = get_package_share_directory('rdk_robot_bringup')
         explore_config = os.path.join(bringup_share, 'config', 'explore.yaml')
     except Exception:
-        explore_config = "/home/ranger/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/explore.yaml"
+        # 尝试通过 WORKSPACE_SETUP_BASH 的上级目录推导
+        install_dir = os.path.dirname(WORKSPACE_SETUP_BASH)
+        explore_config = os.path.join(install_dir, 'rdk_robot_bringup', 'share', 'rdk_robot_bringup', 'config', 'explore.yaml')
+        if not os.path.exists(explore_config):
+            explore_config = "/home/ranger/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/explore.yaml"
 
     cmd = [
         "bash", "-c",
-        f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 run explore_lite explore --ros-args --params-file {explore_config}"
+        f"source /opt/ros/humble/setup.bash && source {WORKSPACE_SETUP_BASH} && ros2 run explore_lite explore --ros-args --params-file {explore_config}"
     ]
     try:
         m.explore_process = subprocess.Popen(cmd, preexec_fn=os.setsid)

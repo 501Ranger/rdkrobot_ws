@@ -15,24 +15,23 @@ echo "=================================================="
 echo ">>> [1/5] 注册 QEMU 多架构运行支持..."
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-# 2. 准备依赖安装的缓存上下文：只拷贝我们核心包的 package.xml 文件
-echo ">>> [2/5] 提取核心包 package.xml 依赖配置文件..."
+# 2. 准备依赖安装的缓存上下文：拷贝除 map_merge 外所有包的 package.xml 文件
+echo ">>> [2/5] 提取除 map_merge 外的 package.xml 依赖配置文件..."
 python3 -c "
 import os, shutil
 src_dir = 'src'
 dst_dir = 'build_arm64_temp_src/src'
 if os.path.exists('build_arm64_temp_src'):
     shutil.rmtree('build_arm64_temp_src')
-# 仅为我们开发的核心包提取 package.xml，排除第三方包以大幅加速依赖下载
-core_packages = ['rdk_robot_api', 'rdk_robot_core', 'rdk_robot_apps', 'rdk_robot_bringup']
+# 提取除 map_merge 以外的 package.xml，用于安装系统依赖
 for root, dirs, files in os.walk(src_dir):
     if 'package.xml' in files:
-        pkg_name = os.path.basename(root)
-        if pkg_name in core_packages:
-            rel = os.path.relpath(root, src_dir)
-            target = os.path.join(dst_dir, rel)
-            os.makedirs(target, exist_ok=True)
-            shutil.copy(os.path.join(root, 'package.xml'), os.path.join(target, 'package.xml'))
+        if 'map_merge' in root:
+            continue
+        rel = os.path.relpath(root, src_dir)
+        target = os.path.join(dst_dir, rel)
+        os.makedirs(target, exist_ok=True)
+        shutil.copy(os.path.join(root, 'package.xml'), os.path.join(target, 'package.xml'))
 "
 
 # 3. 构建包含所有必要 arm64 依赖的编译容器
@@ -54,7 +53,7 @@ docker run --rm \
   -v "${WORKSPACE_DIR}":/workspace \
   -w /workspace \
   rdk_robot_build:arm64 \
-  bash -c "source /opt/ros/humble/setup.bash && export MAKEFLAGS=-j1 && colcon build --packages-select rdk_robot_api rdk_robot_core rdk_robot_apps rdk_robot_bringup --build-base build_arm64 --install-base install_arm64 --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=None -DCMAKE_CXX_FLAGS='-O1' -DCMAKE_C_FLAGS='-O1' -DBUILD_TESTING=OFF"
+  bash -c "source /opt/ros/humble/setup.bash && export MAKEFLAGS=-j1 && colcon build --packages-skip multirobot_map_merge --build-base build_arm64 --install-base install_arm64 --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=None -DCMAKE_CXX_FLAGS='-O1' -DCMAKE_C_FLAGS='-O1' -DBUILD_TESTING=OFF"
 
 # 5. 将编译产物的属主和属组修改回宿主机当前用户，避免权限冲突
 echo ">>> [5/5] 正在修复编译产物权限为宿主机用户..."

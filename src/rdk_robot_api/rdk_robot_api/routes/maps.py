@@ -141,7 +141,7 @@ def load_map_into_navigation(map_name: str):
         sim_flag = "true" if use_sim else "false"
         cmd = [
             "bash", "-c",
-            f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
+            f"source /opt/ros/humble/setup.bash && source {config.WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
         ]
         try:
             m.loc_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
@@ -183,6 +183,16 @@ def load_map_into_navigation(map_name: str):
     res = future.result()
     if res.result == 0:
         config.current_map_name = map_name  # 更新全局当前地图名
+        
+        # 地图加载成功后，自动向 AMCL 发布初始位姿 (0, 0, 0)
+        # 这使 AMCL 立即开始发布 map->odom TF，解除 costmap 的 "map frame not exist" 报错
+        # 实际场景中用户应随后使用"一键全局重定位"来获得精确定位
+        time.sleep(1.5)  # 等待 AMCL 节点完成激活
+        rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
+        rn.ros_node.get_logger().info(
+            f"Map '{map_name}' loaded. Auto-published initial pose (0,0,0) to bootstrap AMCL TF."
+        )
+        
         return {"status": "success", "message": f"Successfully loaded map: {map_name}"}
     else:
         raise HTTPException(status_code=500, detail=f"Map server failed to load map, result code: {res.result}")

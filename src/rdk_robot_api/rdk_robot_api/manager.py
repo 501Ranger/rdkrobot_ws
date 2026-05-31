@@ -35,6 +35,8 @@ loc_process = None
 nav2_process = None
 sim_process = None
 agent_process = None
+base_process = None
+lidar_process = None
 
 def terminate_process_group(process):
     """安全中止进程及其全部子进程组"""
@@ -72,6 +74,8 @@ async def broadcast_status_loop():
                 agent_running = (agent_res == 0) or ((m.agent_process is not None) and (m.agent_process.poll() is None))
                 
                 sim_running = (m.sim_process is not None) and (m.sim_process.poll() is None)
+                base_running = (m.base_process is not None) and (m.base_process.poll() is None)
+                lidar_running = (m.lidar_process is not None) and (m.lidar_process.poll() is None)
                 
                 status_data = {
                     "battery_percentage": round(rn.ros_node.battery_pct, 1),
@@ -83,6 +87,8 @@ async def broadcast_status_loop():
                     "explore_running": explore_running,
                     "agent_running": agent_running,
                     "sim_running": sim_running,
+                    "base_running": base_running,
+                    "lidar_running": lidar_running,
                     "nav2_plan": rn.ros_node.nav2_path
                 }
                 await manager.broadcast(status_data)

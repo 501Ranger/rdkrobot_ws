@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException
 from .. import ros_node as rn
 from .. import manager as m
 
+from ..config import WORKSPACE_SETUP_BASH
+
 router = APIRouter(prefix="/api/v1/sim", tags=["Simulation"])
 
 @router.post("/start")
@@ -23,7 +25,7 @@ def start_gazebo_simulation():
         
     cmd = [
         "bash", "-c",
-        "source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup gazebo_bringup.launch.py"
+        f"source /opt/ros/humble/setup.bash && source {WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup gazebo_bringup.launch.py"
     ]
     try:
         m.sim_process = subprocess.Popen(cmd, preexec_fn=os.setsid)

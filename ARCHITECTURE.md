@@ -28,7 +28,7 @@ rdkrobot_ws/
 │   │       ├── ros_node.py    # RobotApiNode 节点类 (ActionClient 封装)
 │   │       └── routes/        # RESTful 业务接口分路由子包
 │   │           ├── system.py  # 主机环境与 CPU 架构 API
-│   │           ├── robot.py   # 状态与 WebSocket 广播 API
+│   │           ├── robot.py   # 状态与 WebSocket 广播，及底层硬件（串口代理/TF/雷达）一键初始化/停用 API
 │   │           ├── sim.py     # Gazebo 仿真启停控制 API
 │   │           ├── agent.py   # micro-ROS 串口代理 API
 │   │           ├── patrol.py  # 巡逻指令与定时任务 API
@@ -73,6 +73,7 @@ HMI 服务端在后台维护一个 ROS 2 守护线程，运行中介节点 `Robo
 - `/patrol/cmd` (`std_msgs/msg/String`) -> 下发巡逻控制指令。
 - `/patrol/set_waypoints` (`geometry_msgs/PoseArray`) -> 批量下发规划的航点数组。
 - `/cmd_vel` (`geometry_msgs/Twist`) -> 下发底盘运动速度指令（线速度与角速度），高频响应游戏手柄操控。
+- `/initialpose` (`geometry_msgs/msg/PoseWithCovarianceStamped`) -> 发布初始位姿（0,0,0 等），用于在加载地图或触发重定位时自动激活 AMCL，建立 map → odom 的 TF 树链路。
 
 ### 调用的 ROS 2 Action 动作
 - `navigate_to_pose` (`nav2_msgs/action/NavigateToPose`) -> 驱动机器人前往目标点。

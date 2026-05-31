@@ -7,6 +7,7 @@ let currentMap = null;
 let pollInterval = null;
 let statusInterval = null;
 let currentPose = null;
+let currentGoal = null; // 当前导航目标点 {x, y}
 
 // 地图缩放与平移交互状态
 let zoomScale = 1.0;
@@ -169,10 +170,15 @@ function updateTelemetry(data) {
         navStatusEl.style.color = "var(--accent-cyan)";
     } else if (navStatus === "REACHED") {
         navStatusEl.style.color = "var(--accent-green)";
+        hideGoalMarker(); // 到达目标后清除标记
     } else if (navStatus === "FAILED") {
         navStatusEl.style.color = "var(--accent-red)";
+        hideGoalMarker(); // 导航失败后清除标记
     } else {
         navStatusEl.style.color = "var(--accent-orange)";
+        if (navStatus === "IDLE" || navStatus === "CANCELLED") {
+            hideGoalMarker(); // IDLE / 取消后清除标记
+        }
     }
 
     // 更新电量
@@ -183,6 +189,18 @@ function updateTelemetry(data) {
 
     // 更新下位机在线状态
     updateMcuStatus(data.mcu_online);
+
+    // 更新实机一键初始化按钮状态
+    const btnInitHardware = document.getElementById("btn-init-hardware");
+    if (btnInitHardware) {
+        if (data.base_running && data.lidar_running && data.agent_running) {
+            btnInitHardware.innerText = "🔌 实机已初始化";
+            btnInitHardware.className = "btn btn-success";
+        } else {
+            btnInitHardware.innerText = "🔌 实机一键初始化";
+            btnInitHardware.className = "btn btn-warning";
+        }
+    }
 
     // 更新 SLAM 按钮状态
     const btnStartSlam = document.getElementById("btn-start-slam");
@@ -780,7 +798,18 @@ function navigateByPoiName(poiName) {
         if (!res.ok) return res.json().then(err => { throw new Error(err.detail || "导航失败") });
         return res.json();
     })
-    .then(data => showToast("语义导航已成功触发", "success"))
+    .then(data => {
+        showToast("语义导航已成功触发", "success");
+        // 语义点名称导航：从 POI 列表中查找坐标以显示目标点标记
+        if (currentMap) {
+            fetch(`${API_BASE}/api/v1/maps/${currentMap.name}/pois`)
+                .then(r => r.json())
+                .then(pois => {
+                    const poi = pois.find(p => p.name === poiName);
+                    if (poi) showGoalMarker(poi.x, poi.y);
+                }).catch(() => {});
+        }
+    })
     .catch(err => showToast(err.message, "error"));
 }
 
@@ -804,7 +833,10 @@ function navigateByInputCoords() {
         if (!res.ok) return res.json().then(err => { throw new Error(err.detail || "导航失败") });
         return res.json();
     })
-    .then(data => showToast("物理导航已成功下发", "success"))
+    .then(data => {
+        showToast("物理导航已成功下发", "success");
+        showGoalMarker(x, y); // 在地图上显示目标点标记
+    })
     .catch(err => showToast(err.message, "error"));
 }
 
@@ -896,6 +928,23 @@ function setupEventListeners() {
     document.getElementById("map-image").addEventListener("click", handleMapClick);
 
     // C. SLAM 建图控制
+    const btnInitHardware = document.getElementById("btn-init-hardware");
+    if (btnInitHardware) {
+        btnInitHardware.addEventListener("click", () => {
+            showToast("正在一键初始化实机硬件，启动底盘与雷达...", "info");
+            fetch(`${API_BASE}/api/v1/robot/hardware/init`, { method: "POST" })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === "success") {
+                        showToast("实机硬件初始化成功，已拉起底层节点！", "success");
+                    } else {
+                        showToast("初始化失败：" + data.details.join(", "), "error");
+                    }
+                })
+                .catch(() => showToast("下发硬件初始化命令失败", "error"));
+        });
+    }
+
     document.getElementById("btn-start-slam").addEventListener("click", () => {
         fetch(`${API_BASE}/api/v1/slam/start`, { method: "POST" })
             .then(res => res.json())
@@ -956,7 +1005,10 @@ function setupEventListeners() {
     document.getElementById("btn-nav-cancel").addEventListener("click", () => {
         fetch(`${API_BASE}/api/v1/nav/cancel`, { method: "POST" })
             .then(res => res.json())
-            .then(() => showToast("🚨 当前导航已被紧急中止！", "error"));
+            .then(() => {
+                showToast("🚨 当前导航已被紧急中止！", "error");
+                hideGoalMarker(); // 取消导航后清除目标标记
+            });
     });
 
     // F. 巡逻控制按键
@@ -1167,6 +1219,51 @@ function updateRobotMarkerOnMap(pose) {
             drawTrajectory();
         }
     }
+}
+
+// ==========================================
+// 8.1 导航目标点标记显示/隐藏 (Goal Marker)
+// ==========================================
+
+function showGoalMarker(rosX, rosY) {
+    if (!currentMap) return;
+    const img = document.getElementById("map-image");
+    const marker = document.getElementById("goal-marker");
+    const label = document.getElementById("goal-label");
+    if (!img || !marker) return;
+
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    if (!naturalWidth || !naturalHeight) return;
+
+    const resolution = currentMap.resolution;
+    const originX = currentMap.origin[0];
+    const originY = currentMap.origin[1];
+
+    // ROS 坐标 → 像素百分比（与 updateRobotMarkerOnMap 相同算法）
+    const pixelX = (rosX - originX) / resolution;
+    const pixelY = naturalHeight - ((rosY - originY) / resolution);
+    const pctX = (pixelX / naturalWidth) * 100;
+    const pctY = (pixelY / naturalHeight) * 100;
+
+    if (pctX >= 0 && pctX <= 100 && pctY >= 0 && pctY <= 100) {
+        currentGoal = { x: rosX, y: rosY };
+        marker.style.left = `${pctX}%`;
+        marker.style.top = `${pctY}%`;
+        label.textContent = `(${rosX.toFixed(2)}, ${rosY.toFixed(2)})`;
+        
+        // 计算逆缩放比例，保持目标点标识视觉大小恒定（防止地图放大时目标点也跟着变大）
+        const invScale = 1.0 / zoomScale;
+        marker.style.transform = `translate(-50%, -50%) scale(${invScale})`;
+        
+        marker.classList.remove("hidden");
+    }
+}
+
+function hideGoalMarker() {
+    const marker = document.getElementById("goal-marker");
+    if (marker) marker.classList.add("hidden");
+    currentGoal = null;
 }
 
 function drawTrajectory() {
@@ -1480,6 +1577,9 @@ function updateMapTransform() {
     }
     if (currentPose) {
         updateRobotMarkerOnMap(currentPose);
+    }
+    if (currentGoal) {
+        showGoalMarker(currentGoal.x, currentGoal.y);
     }
     drawPlannedPath();
 }

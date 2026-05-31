@@ -141,11 +141,15 @@ def trigger_auto_localize():
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
     
     if not rn.ros_node.localize_cli.service_is_ready():
+        # 即使重定位服务不可用，也先发一次初始位姿使 TF 链路恢复
+        rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
         raise HTTPException(
             status_code=503, 
             detail="Auto localization service not available. Make sure auto_localize node is running."
         )
     
+    # 先发初始位姿确保 AMCL TF 链路存在，再触发精细全局搜索重定位
+    rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
     req = Trigger.Request()
     rn.ros_node.localize_cli.call_async(req)
     return {"status": "success", "message": "Trigger request sent to auto_localize node."}

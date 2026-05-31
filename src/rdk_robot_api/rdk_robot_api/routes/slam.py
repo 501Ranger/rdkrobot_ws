@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from .. import ros_node as rn
 from .. import manager as m
-from ..config import MAPS_DIR
+from ..config import MAPS_DIR, WORKSPACE_SETUP_BASH
 from ..models import MapSavePayload
 
 router = APIRouter(prefix="/api/v1/slam", tags=["SLAM"])
@@ -49,14 +49,15 @@ def _auto_start_nav2_after_delay(use_sim: bool, delay: float = 8.0):
             'nav2_sim_params.yaml' if use_sim else 'nav2_params.yaml'
         )
     except Exception:
-        params_file = (
-            f"/home/ranger/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/"
-            f"{'nav2_sim_params.yaml' if use_sim else 'nav2_params.yaml'}"
+        install_dir = os.path.dirname(WORKSPACE_SETUP_BASH)
+        params_file = os.path.join(
+            install_dir, 'rdk_robot_bringup', 'share', 'rdk_robot_bringup', 'config',
+            'nav2_sim_params.yaml' if use_sim else 'nav2_params.yaml'
         )
 
     cmd = [
         "bash", "-c",
-        f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && "
+        f"source /opt/ros/humble/setup.bash && source {WORKSPACE_SETUP_BASH} && "
         f"ros2 launch rdk_robot_bringup navigation.launch.py use_sim_time:={sim_flag} params_file:={params_file}"
     ]
     try:
@@ -102,7 +103,7 @@ def start_slam_mapping():
     sim_flag = "true" if use_sim else "false"
     cmd = [
         "bash", "-c",
-        f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup slam.launch.py use_sim_time:={sim_flag}"
+        f"source /opt/ros/humble/setup.bash && source {WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup slam.launch.py use_sim_time:={sim_flag}"
     ]
     try:
         m.slam_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
@@ -155,7 +156,7 @@ def save_slam_map(payload: MapSavePayload):
     output_path = os.path.join(MAPS_DIR, payload.map_name)
     cmd = [
         "bash", "-c",
-        f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 run nav2_map_server map_saver_cli -f {output_path}"
+        f"source /opt/ros/humble/setup.bash && source {WORKSPACE_SETUP_BASH} && ros2 run nav2_map_server map_saver_cli -f {output_path}"
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=15.0)

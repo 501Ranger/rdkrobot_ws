@@ -1648,6 +1648,55 @@ input:checked + .slider:before {
 }
 
 /* ==========================================================================
+   Goal Marker (Navigation Target Point)
+   ========================================================================== */
+.goal-marker {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 20;
+}
+.goal-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid var(--accent-cyan);
+    box-shadow: 0 0 10px var(--accent-cyan-glow), inset 0 0 6px var(--accent-cyan-glow);
+    animation: goal-pulse 1.6s ease-in-out infinite;
+}
+.goal-core {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: var(--accent-cyan);
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 8px var(--accent-cyan), 0 0 16px var(--accent-cyan-glow);
+}
+.goal-label {
+    position: absolute;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    font-family: monospace;
+    color: var(--accent-cyan);
+    white-space: nowrap;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 1px 4px;
+    border-radius: 3px;
+    pointer-events: none;
+}
+@keyframes goal-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.6; }
+}
+
+/* ==========================================================================
    Responsive Adaptations
    ========================================================================== */
 @media (max-width: 1024px) {
@@ -1816,12 +1865,58 @@ input:checked + .slider:before {
         flex: 1;
     }
     
-    /* 地图卡片自适应高度，并用 max-width 防止撑宽 */
+    /* ====== 移动端卡片顺序：展平面板，精细控制每张卡片顺序 ====== */
+    .cockpit-layout {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch; /* 关键：确保所有子卡片铺满父容器宽度 */
+        gap: 12px;
+    }
+    /* display:contents 让面板包装器"透明"，子卡片直接参与外层 flex 排序 */
+    .cockpit-panel-left,
+    .cockpit-panel-right {
+        display: contents;
+    }
+    /* 单独控制每张卡片顺序，并强制宽度铺满 */
+    .map-card        { order: 1; width: 100%; box-sizing: border-box; }
+    #card-poi-form   { order: 2; width: 100%; box-sizing: border-box; }
+    #card-localize   { order: 3; width: 100%; box-sizing: border-box; }
+    #card-web-teleop { order: 4; width: 100%; box-sizing: border-box; }
+    #card-gamepad    { display: none; } /* 手机端无需手柄卡片 */
+
+    /* ====== 修复地图卡片头部"加载"按钮被推出屏幕 ====== */
+    .map-selector-wrapper {
+        width: 100%;
+        gap: 6px;
+        flex-wrap: nowrap;
+    }
+    .map-selector-wrapper select {
+        flex: 1 1 0;
+        min-width: 0; /* 关键：允许 select 收缩到比内容更窄 */
+        max-width: none;
+    }
+    .map-selector-wrapper .btn-icon-refresh {
+        flex-shrink: 0;
+        padding: 8px 10px;
+    }
+    .map-selector-wrapper .btn-primary {
+        flex-shrink: 0;
+        padding: 8px 14px;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+    /* ====== 地图卡片内部布局修复 ====== */
+    .map-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
     .map-image-wrapper {
         height: 300px;
-        min-height: 280px;
+        min-height: 260px;
         max-width: 100% !important;
         overflow: hidden;
+        position: relative;
     }
     .map-inner-container {
         max-width: 100% !important;
@@ -1830,19 +1925,6 @@ input:checked + .slider:before {
         max-width: 100% !important;
         height: 100%;
         object-fit: contain;
-    }
-    .map-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 8px;
-    }
-    .map-selector-wrapper {
-        width: 100%;
-        justify-content: space-between;
-    }
-    .map-selector-wrapper select {
-        flex-grow: 1;
-        max-width: none;
     }
     .map-toolbar-row {
         flex-direction: column;

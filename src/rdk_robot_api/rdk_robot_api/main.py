@@ -98,6 +98,8 @@ def main():
         m.terminate_process_group(m.nav2_process)
         m.terminate_process_group(m.sim_process)
         m.terminate_process_group(m.agent_process)
+        m.terminate_process_group(m.base_process)
+        m.terminate_process_group(m.lidar_process)
         os.system("docker kill microros_agent >/dev/null 2>&1 || true")
 
 if __name__ == "__main__":

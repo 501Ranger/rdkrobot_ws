@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from geometry_msgs.msg import Pose
 from nav2_msgs.action import ComputePathToPose
+from std_srvs.srv import Trigger
 
 from .. import ros_node as rn
 from .. import config

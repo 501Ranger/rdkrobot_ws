@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from rclpy.action import ActionClient
 from std_msgs.msg import String, Bool
-from geometry_msgs.msg import PoseArray, Pose, Twist
+from geometry_msgs.msg import PoseArray, Pose, Twist, PoseWithCovarianceStamped
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import BatteryState
 from nav_msgs.msg import Odometry, Path
@@ -22,6 +22,28 @@ class RobotApiNode(Node):
     def __init__(self):
         super().__init__("robot_api_node")
 
+        # 自适应设置 use_sim_time 以防止仿真环境下导航时间戳校验失效
+        try:
+            if not self.has_parameter('use_sim_time'):
+                self.declare_parameter('use_sim_time', False)
+            
+            use_sim_time_val = self.get_parameter('use_sim_time').value
+            
+            if not use_sim_time_val:
+                topic_names = [name for name, _ in self.get_topic_names_and_types()]
+                if "/clock" in topic_names:
+                    use_sim_time_val = True
+                    self.set_parameters([
+                        rclpy.parameter.Parameter('use_sim_time', rclpy.Parameter.Type.BOOL, True)
+                    ])
+                    self.get_logger().info("Auto-detected /clock topic: upgraded use_sim_time to True")
+                else:
+                    self.get_logger().info("No /clock topic detected: keeping use_sim_time as False")
+            else:
+                self.get_logger().info("use_sim_time is already set to True by external configuration")
+        except Exception as e:
+            self.get_logger().warn(f"Failed to auto-detect use_sim_time: {e}")
+
         # 配置 Transient Local QoS 订阅状态
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
@@ -36,6 +58,9 @@ class RobotApiNode(Node):
         )
         self.odom_sub = self.create_subscription(
             Odometry, "/odom", self.odom_callback, 10
+        )
+        self.amcl_pose_sub = self.create_subscription(
+            PoseWithCovarianceStamped, "/amcl_pose", self.amcl_pose_callback, 10
         )
         self.localize_status_sub = self.create_subscription(
             Bool, "/auto_localize/status", self.localize_status_callback, qos
@@ -63,15 +88,35 @@ class RobotApiNode(Node):
         self.latest_goal_id = 0
         self.nav_status = "idle"  # "idle", "navigating", "reached", "failed", "canceled"
 
-        # 下位机在线检测时间戳
+        # 下位机在线检测时间戳与定位更新时间戳
         self.last_battery_time = 0.0
         self.last_odom_time = 0.0
+        self.last_amcl_time = 0.0
 
     def battery_callback(self, msg: BatteryState):
         self.battery_pct = msg.percentage * 100.0 if msg.percentage <= 1.0 else msg.percentage
         self.last_battery_time = time.time()
 
     def odom_callback(self, msg: Odometry):
+        self.last_odom_time = time.time()
+        
+        # 仅在最近 1.0 秒内无 AMCL 定位数据时，才回退使用里程计（例如 SLAM 建图或未定位状态下）
+        if time.time() - self.last_amcl_time > 1.0:
+            pos = msg.pose.pose.position
+            ori = msg.pose.pose.orientation
+            
+            # 四元数转 yaw
+            siny_cosp = 2.0 * (ori.w * ori.z + ori.x * ori.y)
+            cosy_cosp = 1.0 - 2.0 * (ori.y * ori.y + ori.z * ori.z)
+            yaw = math.atan2(siny_cosp, cosy_cosp)
+            
+            self.robot_pose = {
+                "x": pos.x,
+                "y": pos.y,
+                "yaw": yaw
+            }
+
+    def amcl_pose_callback(self, msg: PoseWithCovarianceStamped):
         pos = msg.pose.pose.position
         ori = msg.pose.pose.orientation
         
@@ -85,7 +130,7 @@ class RobotApiNode(Node):
             "y": pos.y,
             "yaw": yaw
         }
-        self.last_odom_time = time.time()
+        self.last_amcl_time = time.time()
 
     def localize_status_callback(self, msg: Bool):
         self.is_localizing = msg.data

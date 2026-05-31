@@ -3,339 +3,502 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RDK Robot 智能小车控制面板</title>
-    <!-- 引入 Google Fonts (Inter) -->
+    <title>RDK Robot 智能太空舱控制系统</title>
+    <!-- 引入 Google Fonts (Inter & Orbitron 科幻字体) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- 头部导航栏 -->
-        <header class="app-header">
-            <div class="brand">
-                <div class="logo-glow"></div>
-                <h1>Dashboard <span>RDK ROBOT</span></h1>
-            </div>
-            <div class="header-status">
-                <div class="status-item">
-                    <button class="btn btn-secondary btn-theme-toggle" id="btn-theme-toggle" style="padding: 4px 8px; font-size: 1.1rem; border-radius: 50%; min-width: 32px; height: 32px; line-height: 1;" title="切换主题">🌙</button>
-                </div>
-                <div class="status-item">
-                    <span class="label">API 连接:</span>
-                    <span id="connection-status" class="status-badge offline">未连接</span>
-                </div>
-                <div class="status-item">
-                    <span class="label">下位机状态:</span>
-                    <span id="mcu-status" class="status-badge offline">离线</span>
-                </div>
-                <div class="status-item battery-wrapper">
-                    <span class="label">小车电量:</span>
-                    <div class="battery-icon">
-                        <div id="battery-bar" class="battery-level" style="width: 0%"></div>
-                        <div id="battery-charge-indicator" class="charge-indicator hidden">⚡</div>
+    <div class="app-layout">
+        <!-- 左侧导航侧边栏 -->
+        <aside class="app-sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="logo-glow"></div>
+                    <div class="brand-text">
+                        <h1>RDK ROBOT</h1>
+                        <span>CONTROL CABIN</span>
                     </div>
-                    <span id="battery-text">0%</span>
                 </div>
             </div>
-        </header>
-
-        <!-- 主体栅格布局 -->
-        <main class="app-grid">
             
-            <!-- 左栏：系统状态与基本控制 -->
-            <section class="grid-column column-left">
-                <!-- 实时看板 -->
-                <div class="card glass-card">
-                    <div class="card-header">
-                        <h2>📡 实时运行看板</h2>
-                        <div class="pulse-dot active" id="telemetry-pulse"></div>
+            <nav class="sidebar-nav">
+                <button class="nav-item active" id="sidebar-tab-cockpit" data-view="view-cockpit">
+                    <span class="nav-icon">🚀</span>
+                    <span class="nav-text">实时控制舱</span>
+                </button>
+                <button class="nav-item" id="sidebar-tab-slam" data-view="view-slam">
+                    <span class="nav-icon">🛠️</span>
+                    <span class="nav-text">建图与图库</span>
+                </button>
+                <button class="nav-item" id="sidebar-tab-patrol" data-view="view-patrol">
+                    <span class="nav-icon">📅</span>
+                    <span class="nav-text">巡逻与任务</span>
+                </button>
+                <button class="nav-item" id="sidebar-tab-system" data-view="view-system">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">开发与调试</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button class="btn btn-secondary btn-theme-toggle" id="btn-theme-toggle" title="切换主题">🌙</button>
+                <div class="system-version">v2.1.0</div>
+            </div>
+        </aside>
+
+        <!-- 右侧主控制区 -->
+        <main class="app-main">
+            <!-- 顶部全局状态栏 -->
+            <header class="app-topbar">
+                <div class="topbar-status-group">
+                    <div class="status-pill">
+                        <span class="pill-dot" id="dot-api"></span>
+                        <span class="pill-label">API 服务:</span>
+                        <span id="connection-status" class="status-badge offline">未连接</span>
                     </div>
-                    <div class="telemetry-grid">
-                        <div class="tel-item">
-                            <span class="tel-label">X 坐标</span>
-                            <span class="tel-val" id="pose-x">0.000 m</span>
+                    <div class="status-pill">
+                        <span class="pill-dot" id="dot-mcu"></span>
+                        <span class="pill-label">小车底盘:</span>
+                        <span id="mcu-status" class="status-badge offline">离线</span>
+                    </div>
+                    <div class="status-pill battery-pill">
+                        <span class="pill-label">电量:</span>
+                        <div class="battery-icon">
+                            <div id="battery-bar" class="battery-level" style="width: 0%"></div>
+                            <div id="battery-charge-indicator" class="charge-indicator hidden">⚡</div>
                         </div>
-                        <div class="tel-item">
-                            <span class="tel-label">Y 坐标</span>
-                            <span class="tel-val" id="pose-y">0.000 m</span>
-                        </div>
-                        <div class="tel-item">
-                            <span class="tel-label">Yaw 航向</span>
-                            <span class="tel-val" id="pose-yaw">0.00°</span>
-                        </div>
-                        <div class="tel-item">
-                            <span class="tel-label">导航状态</span>
-                            <span class="tel-val status-text" id="nav-status">IDLE</span>
-                        </div>
+                        <span id="battery-text" class="battery-val">0%</span>
                     </div>
                 </div>
 
-                <!-- 模式切换 -->
-                <div class="card glass-card">
-                    <div class="card-header">
-                        <h2>🔄 运行模式切换</h2>
+                <!-- 顶部栏迷你实时看板 -->
+                <div class="topbar-telemetry">
+                    <div class="tel-pill">
+                        <span class="label">X</span>
+                        <span class="val" id="pose-x">0.000 m</span>
                     </div>
-                    <div class="control-group simulation-group" id="simulation-group">
-                        <button class="btn btn-secondary" id="btn-start-sim">启动 Gazebo 仿真</button>
-                        <button class="btn btn-danger" id="btn-stop-sim">关闭 Gazebo 仿真</button>
+                    <div class="tel-pill">
+                        <span class="label">Y</span>
+                        <span class="val" id="pose-y">0.000 m</span>
                     </div>
-                    <div class="divider simulation-divider" id="simulation-divider"></div>
-
-                    <!-- micro-ROS 代理控制 -->
-                    <div class="control-group agent-group" id="agent-group">
-                        <button class="btn btn-secondary" id="btn-start-agent">启动 micro-ROS 代理</button>
-                        <button class="btn btn-danger" id="btn-stop-agent">关闭 micro-ROS 代理</button>
+                    <div class="tel-pill">
+                        <span class="label">Yaw</span>
+                        <span class="val" id="pose-yaw">0.00°</span>
                     </div>
-                    <div class="divider agent-divider" id="agent-divider"></div>
-                    <div class="control-group mode-switcher-btns">
-                        <button class="btn btn-primary" id="btn-start-slam">开启 SLAM 建图</button>
-                        <button class="btn btn-danger" id="btn-stop-slam">停止 SLAM 建图</button>
-                    </div>
-                    <div class="map-save-wrapper">
-                        <input type="text" id="input-map-name" placeholder="输入保存地图名称 (如: room_1)" class="form-input">
-                        <button class="btn btn-success" id="btn-save-map">一键保存当前地图</button>
-                    </div>
-                    <div class="divider"></div>
-                    <div class="control-group">
-                        <button class="btn btn-secondary" id="btn-start-explore">开启 自主探索</button>
-                        <button class="btn btn-danger" id="btn-stop-explore">关闭 自主探索</button>
-                    </div>
-                    <div class="divider"></div>
-                    <div class="control-group localize-group-container">
-                        <button class="btn btn-warning" id="btn-auto-localize">🔄 一键全局重定位</button>
-                        <div class="localize-status-wrapper">
-                            <span class="pulse-dot active" id="localize-pulse"></span>
-                            <span id="lbl-auto-localize-status" class="status-label">未知状态</span>
-                        </div>
+                    <div class="tel-pill status-pill-nav">
+                        <span class="label">导航</span>
+                        <span class="val status-text" id="nav-status">IDLE</span>
                     </div>
                 </div>
+            </header>
 
-                <!-- 定时巡逻管理 -->
-                <div class="card glass-card">
-                    <div class="card-header">
-                        <h2>📅 定时巡逻配置</h2>
-                    </div>
-                    <div class="schedule-form">
-                        <input type="time" id="input-schedule-time" class="form-input">
-                        <button class="btn btn-primary" id="btn-add-schedule">添加定时任务</button>
-                    </div>
-                    <div class="schedule-list-wrapper">
-                        <h3>当前定时列表:</h3>
-                        <ul class="schedule-list" id="schedule-list">
-                            <li class="empty-list-text">暂无定时任务</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <!-- 🎮 游戏手柄遥控中枢 -->
-                <div class="card glass-card">
-                    <div class="card-header">
-                        <h2>🎮 蓝牙手柄遥控</h2>
-                        <div class="pulse-dot" id="gamepad-pulse"></div>
-                    </div>
-                    <div class="gamepad-container" style="display: flex; flex-direction: column; gap: 12px;">
-                        <div class="gamepad-status-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
-                            <span class="gamepad-label" style="color: var(--text-secondary);">连接状态:</span>
-                            <span id="gamepad-status-badge" class="status-badge offline">未连接</span>
-                        </div>
-                        <div class="gamepad-info-row hidden" id="gamepad-info-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
-                            <span class="gamepad-label" style="color: var(--text-secondary);">设备型号:</span>
-                            <span id="gamepad-model" class="gamepad-val" style="color: var(--accent-cyan); font-weight: 600; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; text-align: right;">-</span>
-                        </div>
-                        <div class="gamepad-control-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
-                            <span class="gamepad-label" style="color: var(--text-secondary);">手柄使能开关:</span>
-                            <label class="switch">
-                                <input type="checkbox" id="gamepad-enable-switch">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                        
-                        <!-- 摇杆可视化偏置指示盘 -->
-                        <div class="gamepad-joystick-visualizer">
-                            <div class="joystick-ring">
-                                <div class="joystick-axis-x"></div>
-                                <div class="joystick-axis-y"></div>
-                                <div class="joystick-pointer" id="joystick-pointer"></div>
-                            </div>
-                            <div class="joystick-labels">
-                                <span>线速度 (X轴)</span>
-                                <span>角速度 (Yaw轴)</span>
-                            </div>
-                        </div>
-                        <div class="map-hint" style="margin-top: 5px; font-size: 0.72rem; line-height: 1.35;">
-                            💡 先在系统蓝牙设置中连接 Xbox 手柄，随后按手柄任意键激活连接。
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 中/右栏：地图可视化与语义导航 -->
-            <section class="grid-column column-right">
-                <!-- 地图查看器 -->
-                <div class="card glass-card map-card">
-                    <div class="card-header map-header">
-                        <h2>🗺️ 导航地图中枢</h2>
-                        <div class="map-selector-wrapper">
-                            <select id="map-select" class="form-select">
-                                <option value="">-- 请选择或拉取地图 --</option>
-                            </select>
-                            <button class="btn btn-icon-refresh" id="btn-refresh-maps">🔄 刷新</button>
-                            <button class="btn btn-primary" id="btn-load-map">加载选中地图</button>
-                        </div>
-                    </div>
-                    
-                    <div class="map-canvas-container">
-                        <div class="map-hint">💡 提示: 加载地图后，用鼠标直接点击地图图像可自动提取坐标点！</div>
-                        <div class="map-image-wrapper">
-                            <!-- 缩放与平移控制工具栏 -->
-                            <div class="map-toolbar" id="map-toolbar">
-                                <button class="btn-tool" id="btn-zoom-in" title="放大">➕</button>
-                                <button class="btn-tool" id="btn-zoom-out" title="缩小">➖</button>
-                                <button class="btn-tool" id="btn-zoom-reset" title="重置">🏠</button>
-                                <button class="btn-tool active-tool" id="btn-toggle-trajectory" title="显示/隐藏小车轨迹">👣</button>
-                                <button class="btn-tool" id="btn-clear-trajectory" title="清除小车轨迹">🧹</button>
-                            </div>
-                             
-                             <div id="map-inner-container" class="map-inner-container hidden">
-                                 <img id="map-image" src="" alt="等待地图加载..." class="map-img-element">
-                                 <svg id="map-svg-overlay" class="map-svg-overlay">
-                                     <polyline id="trajectory-path" class="path-line trajectory-line" points=""></polyline>
-                                     <polyline id="nav2-path" class="path-line nav2-path-line" points=""></polyline>
-                                     <polyline id="planned-path" class="path-line planned-line" points=""></polyline>
-                                     <g id="waypoint-markers-group"></g>
-                                 </svg>
-                                 <div id="robot-marker" class="robot-marker hidden">
-                                     <div class="arrow"></div>
-                                 </div>
-                             </div>
-                             <div id="map-loading" class="map-loader hidden">
-                                <div class="spinner"></div>
-                                <span>正在转换并加载 PGM 图像...</span>
-                            </div>
-                            <div id="map-placeholder" class="map-placeholder-box">
-                                <span>暂未加载地图，请在上方选择并点击“加载选中地图”</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 导航与语义点管理 -->
-                <div class="double-grid">
-                    <!-- 语义点标定 -->
-                    <div class="card glass-card">
-                        <div class="card-header">
-                            <h2>📍 语义点 (POI) 标定</h2>
-                        </div>
-                        <div class="poi-form">
-                            <div class="form-row">
-                                <label for="poi-name">点名称</label>
-                                <input type="text" id="poi-name" placeholder="如: kitchen" class="form-input">
-                            </div>
-                            <div class="form-row coords-row">
-                                <div>
-                                    <label for="poi-x">X 坐标</label>
-                                    <input type="number" step="0.001" id="poi-x" class="form-input">
+            <!-- 动态视口内容区 -->
+            <div class="app-content">
+                
+                <!-- ==================== 1. 实时控制舱 VIEW ==================== -->
+                <div class="view-pane" id="view-cockpit">
+                    <div class="cockpit-layout">
+                        <!-- 左面板：遥控与定位配置 -->
+                        <div class="cockpit-panel-left">
+                            
+                            <!-- 网页端手势与键盘遥控 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🎮 网页终端遥控舱</h2>
+                                    <div class="teleop-header-actions">
+                                        <span class="control-label" style="font-size: 0.8rem; color: var(--text-secondary);">使能:</span>
+                                        <label class="switch">
+                                            <input type="checkbox" id="web-teleop-enable-switch">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label for="poi-y">Y 坐标</label>
-                                    <input type="number" step="0.001" id="poi-y" class="form-input">
-                                </div>
-                                <div>
-                                    <label for="poi-yaw">Yaw 朝向</label>
-                                    <input type="number" step="0.001" id="poi-yaw" value="0.0" class="form-input">
+                                <div class="web-teleop-container">
+                                    <!-- 虚拟摇杆 -->
+                                    <div class="virtual-joystick-wrapper">
+                                        <div class="joystick-base" id="joystick-base">
+                                            <div class="joystick-handle" id="joystick-handle"></div>
+                                        </div>
+                                        <div class="joystick-label">鼠标拖拽或滑屏操纵摇杆</div>
+                                    </div>
+                                    <!-- 键盘 WASD 指示器 -->
+                                    <div class="keyboard-visualizer">
+                                        <div class="key-row">
+                                            <div class="key-cap" id="key-w">W</div>
+                                        </div>
+                                        <div class="key-row">
+                                            <div class="key-cap" id="key-a">A</div>
+                                            <div class="key-cap" id="key-s">S</div>
+                                            <div class="key-cap" id="key-d">D</div>
+                                        </div>
+                                        <div class="keyboard-label">PC 端支持 WASD / 方向键操控</div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="form-buttons">
-                                <button class="btn btn-success" id="btn-save-poi">保存点位到当前地图</button>
-                                <button class="btn btn-primary" id="btn-navigate-coords">前往该坐标</button>
+
+                            <!-- 蓝牙手柄遥控中枢 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🎮 Xbox 蓝牙手柄遥控</h2>
+                                    <div class="pulse-dot" id="gamepad-pulse"></div>
+                                </div>
+                                <div class="gamepad-container">
+                                    <div class="gamepad-status-row">
+                                        <span class="gamepad-label">手柄连接:</span>
+                                        <span id="gamepad-status-badge" class="status-badge offline">未连接</span>
+                                    </div>
+                                    <div class="gamepad-info-row hidden" id="gamepad-info-row">
+                                        <span class="gamepad-label">设备型号:</span>
+                                        <span id="gamepad-model" class="gamepad-val">-</span>
+                                    </div>
+                                    <div class="gamepad-control-row">
+                                        <span class="gamepad-label">手柄遥控使能:</span>
+                                        <label class="switch">
+                                            <input type="checkbox" id="gamepad-enable-switch">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <!-- 摇杆可视化偏置指示盘 -->
+                                    <div class="gamepad-joystick-visualizer">
+                                        <div class="joystick-ring">
+                                            <div class="joystick-axis-x"></div>
+                                            <div class="joystick-axis-y"></div>
+                                            <div class="joystick-pointer" id="joystick-pointer"></div>
+                                        </div>
+                                        <div class="joystick-labels">
+                                            <span>线速度 (X)</span>
+                                            <span>角速度 (Yaw)</span>
+                                        </div>
+                                    </div>
+                                    <div class="map-hint" style="font-size: 0.7rem; margin-top: 5px; line-height: 1.3;">
+                                        💡 连接蓝牙 Xbox 手柄后，按下手柄任意键激活连接。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 定位与重定位管理 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🔄 物理定位管理</h2>
+                                </div>
+                                <div class="localize-control-box">
+                                    <div class="localize-status-wrapper">
+                                        <span class="pulse-dot active" id="localize-pulse"></span>
+                                        <span id="lbl-auto-localize-status" class="status-label">未知状态</span>
+                                    </div>
+                                    <button class="btn btn-warning btn-block" id="btn-auto-localize">🔄 一键全局重定位</button>
+                                    <button class="btn btn-danger btn-block" id="btn-nav-cancel" style="margin-top: 10px;">🚨 紧急中止当前导航</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右面板：地图与语义标定 -->
+                        <div class="cockpit-panel-right">
+                            <!-- 地图查看器 -->
+                            <div class="card glass-card map-card">
+                                <div class="card-header map-header">
+                                    <h2>🗺️ 导航地图中枢</h2>
+                                    <div class="map-selector-wrapper">
+                                        <select id="map-select" class="form-select">
+                                            <option value="">-- 请选择或拉取地图 --</option>
+                                        </select>
+                                        <button class="btn btn-icon-refresh" id="btn-refresh-maps" title="刷新地图列表">🔄</button>
+                                        <button class="btn btn-primary" id="btn-load-map">加载</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="map-canvas-container">
+                                    <div class="map-toolbar-row">
+                                        <div class="map-hint">
+                                            💡 加载地图后，直接点击地图即可提取物理 X / Y 坐标点。
+                                        </div>
+                                        <!-- 地图点击模式选择 -->
+                                        <div class="map-click-mode-toggle">
+                                            <label class="click-mode-btn">
+                                                <input type="radio" name="map-click-mode" value="nav" checked>
+                                                <span class="mode-span">📍 单点导航</span>
+                                            </label>
+                                            <label class="click-mode-btn">
+                                                <input type="radio" name="map-click-mode" value="waypoint">
+                                                <span class="mode-span">➕ 添加航点</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="map-image-wrapper">
+                                        <!-- 缩放与平移控制工具栏 -->
+                                        <div class="map-toolbar" id="map-toolbar">
+                                            <button class="btn-tool" id="btn-zoom-in" title="放大">➕</button>
+                                            <button class="btn-tool" id="btn-zoom-out" title="缩小">➖</button>
+                                            <button class="btn-tool" id="btn-zoom-reset" title="重置">🏠</button>
+                                            <button class="btn-tool active-tool" id="btn-toggle-trajectory" title="显示/隐藏小车轨迹">👣</button>
+                                            <button class="btn-tool" id="btn-clear-trajectory" title="清除小车轨迹">🧹</button>
+                                        </div>
+                                         
+                                        <div id="map-inner-container" class="map-inner-container hidden">
+                                            <img id="map-image" src="" alt="等待地图加载..." class="map-img-element">
+                                            <svg id="map-svg-overlay" class="map-svg-overlay">
+                                                <polyline id="trajectory-path" class="path-line trajectory-line" points=""></polyline>
+                                                <polyline id="nav2-path" class="path-line nav2-path-line" points=""></polyline>
+                                                <polyline id="planned-path" class="path-line planned-line" points=""></polyline>
+                                                <g id="waypoint-markers-group"></g>
+                                            </svg>
+                                            <div id="robot-marker" class="robot-marker hidden">
+                                                <div class="arrow"></div>
+                                            </div>
+                                        </div>
+                                        <div id="map-loading" class="map-loader hidden">
+                                            <div class="spinner"></div>
+                                            <span>正在转换并加载 PGM 图像...</span>
+                                        </div>
+                                        <div id="map-placeholder" class="map-placeholder-box">
+                                            <span>暂未加载地图，请在上方选择并点击“加载”</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 语义点 (POI) 标定 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>📍 语义点 (POI) 标定</h2>
+                                </div>
+                                <div class="poi-form">
+                                    <div class="form-row-grid">
+                                        <div class="form-row">
+                                            <label for="poi-name">标记名称</label>
+                                            <input type="text" id="poi-name" placeholder="如: kitchen" class="form-input">
+                                        </div>
+                                        <div class="form-row">
+                                            <label for="poi-x">X 物理坐标 (m)</label>
+                                            <input type="number" step="0.001" id="poi-x" class="form-input" placeholder="0.000">
+                                        </div>
+                                        <div class="form-row">
+                                            <label for="poi-y">Y 物理坐标 (m)</label>
+                                            <input type="number" step="0.001" id="poi-y" class="form-input" placeholder="0.000">
+                                        </div>
+                                        <div class="form-row">
+                                            <label for="poi-yaw">Yaw 朝向角 (rad)</label>
+                                            <input type="number" step="0.001" id="poi-yaw" value="0.0" class="form-input">
+                                        </div>
+                                    </div>
+                                    <div class="form-buttons">
+                                        <button class="btn btn-success" id="btn-save-poi">💾 保存至当前地图</button>
+                                        <button class="btn btn-primary" id="btn-navigate-coords">🚀 前往该物理坐标</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- 语义点列表与巡逻/航线规划控制 -->
-                    <div class="card glass-card">
-                        <div class="card-header tabs-header">
-                            <div class="tab-buttons">
-                                <button class="tab-button active" data-tab="tab-pois">📍 标记点导航</button>
-                                <button class="tab-button" data-tab="tab-route">🗺️ 多点航线规划</button>
-                            </div>
-                        </div>
-                        <div class="tab-content-container">
-                            <!-- POI 导航 & 巡逻 -->
-                            <div class="tab-pane" id="tab-pois">
-                                <div class="poi-list-section">
-                                    <h3>当前地图已标记语义点:</h3>
-                                    <div class="poi-list-container">
-                                        <ul class="poi-list" id="poi-list">
-                                            <li class="empty-list-text">暂无已存标记点</li>
-                                        </ul>
+                <!-- ==================== 2. 建图与图库 VIEW ==================== -->
+                <div class="view-pane hidden" id="view-slam">
+                    <div class="slam-layout">
+                        <!-- 建图控制 -->
+                        <div class="slam-controls-grid">
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🗺️ SLAM 建图控制</h2>
+                                </div>
+                                <div class="slam-actions-box">
+                                    <p class="section-desc">通过激光雷达与里程计实现实时同步定位与建图 (SLAM)</p>
+                                    <div class="btn-group">
+                                        <button class="btn btn-primary" id="btn-start-slam">开启 SLAM 建图</button>
+                                        <button class="btn btn-danger hidden" id="btn-stop-slam">停止 SLAM 建图</button>
                                     </div>
                                 </div>
                                 <div class="divider"></div>
-                                <div class="patrol-control-section">
-                                    <h3>巡逻指令中枢:</h3>
-                                    <div class="patrol-btn-grid">
-                                        <button class="btn btn-primary" id="btn-patrol-start">启动巡逻</button>
-                                        <button class="btn btn-warning" id="btn-patrol-pause">暂停</button>
-                                        <button class="btn btn-primary" id="btn-patrol-resume">继续</button>
-                                        <button class="btn btn-danger" id="btn-patrol-stop">终止</button>
+                                <div class="map-save-wrapper">
+                                    <label for="input-map-name" style="font-size: 0.8rem; color: var(--text-secondary);">保存地图名称</label>
+                                    <div class="save-input-group">
+                                        <input type="text" id="input-map-name" placeholder="如: lab_room_1" class="form-input">
+                                        <button class="btn btn-success" id="btn-save-map">保存地图</button>
                                     </div>
-                                </div>
-                                <div class="nav-cancel-section">
-                                    <button class="btn btn-danger btn-block" id="btn-nav-cancel">🚨 紧急中止当前导航</button>
                                 </div>
                             </div>
 
-                            <!-- 多点航线规划 -->
-                            <div class="tab-pane hidden" id="tab-route">
-                                <div class="route-mode-selector">
-                                    <span class="mode-label">地图点击模式:</span>
-                                    <div class="mode-options">
-                                        <label class="mode-opt">
-                                            <input type="radio" name="map-click-mode" value="nav" checked>
-                                            <span>单点导航</span>
-                                        </label>
-                                        <label class="mode-opt">
-                                            <input type="radio" name="map-click-mode" value="waypoint">
-                                            <span>添加航点</span>
-                                        </label>
-                                    </div>
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🧭 前沿边界自主探索</h2>
                                 </div>
-                                <div class="waypoint-list-section">
-                                    <h3>待规划航点列表 (可上下拖拽排序):</h3>
-                                    <div class="waypoint-list-container">
-                                        <ul class="waypoint-list" id="waypoint-list">
-                                            <li class="empty-list-text">暂无航点，请在上方切换“添加航点”并在地图上点击</li>
-                                        </ul>
+                                <div class="explore-actions-box">
+                                    <p class="section-desc">基于 explore_lite 算法控制小车自动向未知边界移动建图</p>
+                                    <div class="btn-group">
+                                        <button class="btn btn-secondary" id="btn-start-explore">开启 自主探索</button>
+                                        <button class="btn btn-danger hidden" id="btn-stop-explore">关闭 自主探索</button>
                                     </div>
-                                </div>
-                                <div class="form-buttons route-buttons">
-                                    <button class="btn btn-danger" id="btn-clear-waypoints">🧹 清除路径</button>
-                                    <button class="btn btn-success" id="btn-start-waypoint-patrol">🚀 启动巡逻</button>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- 📂 历史地图预览与管理 -->
-                    <div class="card glass-card map-gallery-card">
-                        <div class="card-header gallery-header">
-                            <h2>📂 历史地图预览与管理</h2>
-                            <button class="btn btn-secondary btn-icon-refresh" id="btn-refresh-gallery">🔄 刷新地图库</button>
-                        </div>
-                        <div class="map-gallery-grid" id="map-gallery">
-                            <div class="empty-list-text">正在加载历史地图...</div>
+                        <!-- 历史地图库预览与管理 -->
+                        <div class="card glass-card map-gallery-card">
+                            <div class="card-header gallery-header">
+                                <h2>📂 历史地图库预览与管理</h2>
+                                <button class="btn btn-secondary btn-icon-refresh" id="btn-refresh-gallery">🔄 刷新地图库</button>
+                            </div>
+                            <div class="map-gallery-grid" id="map-gallery">
+                                <div class="empty-list-text">正在加载历史地图...</div>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </section>
 
+                <!-- ==================== 3. 巡逻与任务 VIEW ==================== -->
+                <div class="view-pane hidden" id="view-patrol">
+                    <div class="patrol-layout">
+                        <!-- 左面板：定时巡逻配置 -->
+                        <div class="patrol-panel-left">
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>📅 定时巡逻任务配置</h2>
+                                </div>
+                                <div class="schedule-form">
+                                    <input type="time" id="input-schedule-time" class="form-input">
+                                    <button class="btn btn-primary" id="btn-add-schedule">添加定时计划</button>
+                                </div>
+                                <div class="schedule-list-wrapper">
+                                    <h3>当前已排期任务:</h3>
+                                    <ul class="schedule-list" id="schedule-list">
+                                        <li class="empty-list-text">暂无定时任务</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            
+                            <!-- 巡逻指令中枢 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🎮 巡逻指令中枢</h2>
+                                </div>
+                                <div class="patrol-control-section">
+                                    <p class="section-desc">控制机器人的多点往复巡逻任务流</p>
+                                    <div class="patrol-btn-grid">
+                                        <button class="btn btn-primary" id="btn-patrol-start">🚀 启动巡逻</button>
+                                        <button class="btn btn-warning" id="btn-patrol-pause">⏸️ 暂停</button>
+                                        <button class="btn btn-primary" id="btn-patrol-resume">▶️ 继续</button>
+                                        <button class="btn btn-danger" id="btn-patrol-stop">⏹️ 终止</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右面板：航线规划与标记点 -->
+                        <div class="patrol-panel-right">
+                            <div class="card glass-card patrol-tabs-card">
+                                <div class="card-header tabs-header">
+                                    <div class="tab-buttons">
+                                        <button class="tab-button active" data-tab="tab-pois">📍 标记点快速导航</button>
+                                        <button class="tab-button" data-tab="tab-route">🗺️ 航点航线规划</button>
+                                    </div>
+                                </div>
+                                <div class="tab-content-container">
+                                    <!-- POI 列表 -->
+                                    <div class="tab-pane" id="tab-pois">
+                                        <div class="poi-list-section">
+                                            <h3>当前地图已保存语义点:</h3>
+                                            <div class="poi-list-container">
+                                                <ul class="poi-list" id="poi-list">
+                                                    <li class="empty-list-text">暂无已存标记点</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 多点航线规划 -->
+                                    <div class="tab-pane hidden" id="tab-route">
+                                        <div class="waypoint-list-section">
+                                            <div class="waypoint-section-header">
+                                                <h3>待规划航点序列 (可拖拽或点击排序):</h3>
+                                                <div class="map-hint" style="margin: 0; padding: 4px 8px;">
+                                                    💡 在地图右上角切换“添加航点”模式后在地图上点击取点
+                                                </div>
+                                            </div>
+                                            <div class="waypoint-list-container">
+                                                <ul class="waypoint-list" id="waypoint-list">
+                                                    <li class="empty-list-text">暂无航点，请在上方切换“添加航点”并在地图上点击</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                        <div class="form-buttons route-buttons">
+                                            <button class="btn btn-danger" id="btn-clear-waypoints">🧹 清除所有点</button>
+                                            <button class="btn btn-success" id="btn-start-waypoint-patrol">🚀 下发规划并启动巡逻</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== 4. 开发与调试 VIEW ==================== -->
+                <div class="view-pane hidden" id="view-system">
+                    <div class="system-layout">
+                        <div class="card glass-card">
+                            <div class="card-header">
+                                <h2>🖥️ 机器人系统集成调试</h2>
+                            </div>
+                            
+                            <div class="system-debug-grid">
+                                <!-- Gazebo 仿真控制 -->
+                                <div class="debug-card" id="simulation-group">
+                                    <h3>🎮 Gazebo 物理仿真环境</h3>
+                                    <p class="section-desc">启动或关闭 Gazebo 仿真容器（非 ARM 主机可用）</p>
+                                    <div class="btn-group-row">
+                                        <button class="btn btn-secondary" id="btn-start-sim">启动 Gazebo 仿真</button>
+                                        <button class="btn btn-danger" id="btn-stop-sim">关闭 Gazebo 仿真</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="divider simulation-divider" id="simulation-divider"></div>
+
+                                <!-- micro-ROS 代理控制 -->
+                                <div class="debug-card" id="agent-group">
+                                    <h3>🔌 micro-ROS 串口代理服务</h3>
+                                    <p class="section-desc">建立底盘微控制器（MCU）与 ROS 2 Humble 之间的串口通信中介</p>
+                                    <div class="btn-group-row">
+                                        <button class="btn btn-secondary" id="btn-start-agent">启动 micro-ROS 代理</button>
+                                        <button class="btn btn-danger" id="btn-stop-agent">关闭 micro-ROS 代理</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 调试系统架构说明 -->
+                        <div class="card glass-card">
+                            <div class="card-header">
+                                <h2>📖 调试架构与环境背景</h2>
+                            </div>
+                            <div class="system-architecture-info">
+                                <div class="arch-item">
+                                    <span class="arch-label">上位机硬件平台:</span>
+                                    <span class="arch-val">RDK X5 嵌入式板卡</span>
+                                </div>
+                                <div class="arch-item">
+                                    <span class="arch-label">核心 ROS 2 版本:</span>
+                                    <span class="arch-val">ROS 2 Humble Hawksbill</span>
+                                </div>
+                                <div class="arch-item">
+                                    <span class="arch-label">HMI 通信双轨容错:</span>
+                                    <span class="arch-val">WebSocket (10Hz / 15Hz) & HTTP Polling (1.5s)</span>
+                                </div>
+                                <div class="arch-item">
+                                    <span class="arch-label">小车速度约束:</span>
+                                    <span class="arch-val">线速度 &le; 0.45 m/s | 角速度 &le; 1.20 rad/s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </main>
     </div>
 
-    <!-- 弹窗提示组件 -->
+    <!-- 悬浮弹窗提示组件 -->
     <div id="toast" class="toast hidden"></div>
 
     <script src="/static/js/app.js"></script>

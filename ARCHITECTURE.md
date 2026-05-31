@@ -64,7 +64,8 @@ HMI 服务端在后台维护一个 ROS 2 守护线程，运行中介节点 `Robo
 
 ### 订阅的 ROS 2 话题
 - `/battery_state` (`sensor_msgs/msg/BatteryState`) -> 获取小车当前电压与电量。
-- `/odom` (`nav_msgs/msg/Odometry`) -> 换算小车 $X, Y, Yaw$ 位姿坐标。
+- `/amcl_pose` (`geometry_msgs/msg/PoseWithCovarianceStamped`) -> 获取小车在地图 `map` 坐标系下的估计位姿，优先作为 HMI 地图中的机器人定位源。
+- `/odom` (`nav_msgs/msg/Odometry`) -> 里程计位姿坐标。在 AMCL 未启动或 1.0 秒无定位更新时，自动退避使用里程计坐标绘制移动迹线。
 - `/auto_localize/status` (`std_msgs/msg/Bool`) -> 重定位状态（空闲、重定位中等）。
 - `/plan` (`nav_msgs/msg/Path`) -> Nav2 规划出的全局路径折线，后台自动进行降采样提取（最大 150 个点以优化传输带宽）。
 

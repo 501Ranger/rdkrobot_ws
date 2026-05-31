@@ -21,24 +21,32 @@ let dragStartY = 0;
 
 // DOM 载入完成后的初始化
 document.addEventListener("DOMContentLoaded", () => {
-    // 00. 初始化页面配色主题
+    // 0. 初始化页面配色主题
     initTheme();
-    // 000. 初始化游戏手柄遥控监听与连接自动轮询
+    
+    // 1. 初始化侧边栏 Tab 切换视图
+    initSidebarTabs();
+    
+    // 2. 初始化网页端虚拟摇杆与键盘控制
+    initVirtualJoystick();
+    initKeyboardTeleop();
+
+    // 3. 初始化蓝牙游戏手柄
     initGamepad();
 
-    // 0. 检测系统环境是否为 ARM 以展示或隐藏仿真控制
+    // 4. 检测系统环境是否为 ARM 以展示或隐藏仿真控制
     checkSystemInfo();
 
-    // 1. 初始化拉取数据
+    // 5. 初始化拉取各接口数据
     refreshMapList();
     refreshScheduleList();
     refreshMapGallery();
     
-    // 2. 初始化标签页与 WebSocket 实时推送
+    // 6. 初始化子标签页（巡逻的 POI / 航线规划 Tabs）与 WebSocket 实时推送
     initTabs();
     initWebSocket();
 
-    // 3. 绑定事件监听
+    // 7. 绑定所有交互按键的事件监听
     setupEventListeners();
 });
 
@@ -155,16 +163,16 @@ function updateTelemetry(data) {
     const navStatus = data.nav_status ? data.nav_status.toUpperCase() : "IDLE";
     navStatusEl.innerText = navStatus;
     
-    // 改变状态文字颜色
-    navStatusEl.className = "tel-val status-text";
+    // 改变状态文字颜色 (适配新的 HMI 状态配色)
+    navStatusEl.className = "val status-text";
     if (navStatus === "NAVIGATING") {
-        navStatusEl.style.color = "#00d8ff"; // 蓝色
+        navStatusEl.style.color = "var(--accent-cyan)";
     } else if (navStatus === "REACHED") {
-        navStatusEl.style.color = "#10b981"; // 绿色
+        navStatusEl.style.color = "var(--accent-green)";
     } else if (navStatus === "FAILED") {
-        navStatusEl.style.color = "#ef4444"; // 红色
+        navStatusEl.style.color = "var(--accent-red)";
     } else {
-        navStatusEl.style.color = "#f59e0b"; // 橙色
+        navStatusEl.style.color = "var(--accent-orange)";
     }
 
     // 更新电量
@@ -223,15 +231,62 @@ function initTabs() {
         btn.addEventListener("click", () => {
             const targetTab = btn.getAttribute("data-tab");
 
-            // Deactivate all buttons
             tabButtons.forEach(b => b.classList.remove("active"));
-            // Activate current button
             btn.classList.add("active");
 
-            // Hide all panes
             tabPanes.forEach(pane => pane.classList.add("hidden"));
-            // Show target pane
             document.getElementById(targetTab).classList.remove("hidden");
+        });
+    });
+}
+
+// ==========================================
+// 1.1 侧边栏主标签页导航视图切换 (Sidebar Navigation)
+// ==========================================
+function initSidebarTabs() {
+    const navItems = document.querySelectorAll(".nav-item");
+    const viewPanes = document.querySelectorAll(".view-pane");
+
+    // 获取本地记忆的激活视图，默认为 cockpit
+    const savedView = localStorage.getItem("active-view-pane") || "view-cockpit";
+
+    // 渲染初始化激活状态
+    navItems.forEach(item => {
+        const viewName = item.getAttribute("data-view");
+        if (viewName === savedView) {
+            item.classList.add("active");
+        } else {
+            item.classList.remove("active");
+        }
+    });
+
+    viewPanes.forEach(pane => {
+        if (pane.id === savedView) {
+            pane.classList.remove("hidden");
+        } else {
+            pane.classList.add("hidden");
+        }
+    });
+
+    // 绑定导航事件
+    navItems.forEach(item => {
+        item.addEventListener("click", () => {
+            const targetView = item.getAttribute("data-view");
+            if (!targetView) return;
+
+            navItems.forEach(i => i.classList.remove("active"));
+            item.classList.add("active");
+
+            viewPanes.forEach(pane => {
+                if (pane.id === targetView) {
+                    pane.classList.remove("hidden");
+                } else {
+                    pane.classList.add("hidden");
+                }
+            });
+
+            localStorage.setItem("active-view-pane", targetView);
+            showToast(`已切入面板: ${item.querySelector('.nav-text').innerText}`, "success");
         });
     });
 }
@@ -269,7 +324,7 @@ function renderWaypointList() {
             </div>
         `;
         
-        // Move up/down buttons
+        // 上下排序点击事件
         const btnUp = li.querySelector(".btn-move-up");
         const btnDown = li.querySelector(".btn-move-down");
         if (btnUp) {
@@ -285,13 +340,13 @@ function renderWaypointList() {
             });
         }
         
-        // Remove button event
+        // 删除事件
         li.querySelector(".btn-remove-wp").addEventListener("click", (e) => {
             e.stopPropagation();
             removeWaypoint(index);
         });
         
-        // Drag and drop event listeners
+        // 拖拽排序事件监听 (原生 DND)
         li.addEventListener("dragstart", handleDragStart);
         li.addEventListener("dragover", handleDragOver);
         li.addEventListener("drop", handleDrop);
@@ -339,7 +394,7 @@ function handleDrop(e) {
         const fromIndex = parseInt(dragSourceElement.getAttribute("data-index"), 10);
         const toIndex = parseInt(this.getAttribute("data-index"), 10);
         
-        // Reorder array
+        // 重整航点顺序数组
         const temp = waypointList[fromIndex];
         waypointList.splice(fromIndex, 1);
         waypointList.splice(toIndex, 0, temp);
@@ -400,7 +455,7 @@ function refreshMapGallery() {
         .then(data => {
             galleryEl.innerHTML = "";
             if (data.length === 0) {
-                galleryEl.innerHTML = '<div class="empty-list-text">暂无历史地图，请在左侧建图并保存</div>';
+                galleryEl.innerHTML = '<div class="empty-list-text">暂无历史地图，请在“建图与图库”中建图并保存</div>';
                 return;
             }
             
@@ -471,15 +526,18 @@ function updateConnectionStatus(isOnline) {
     if (isOnline) {
         badge.innerText = "在线";
         badge.className = "status-badge online";
+        document.getElementById("dot-api").className = "pill-dot active success";
     } else {
         badge.innerText = "断开";
         badge.className = "status-badge offline";
+        document.getElementById("dot-api").className = "pill-dot active danger";
+        
         // 重置看板参数
         document.getElementById("pose-x").innerText = "-- m";
         document.getElementById("pose-y").innerText = "-- m";
         document.getElementById("pose-yaw").innerText = "--°";
         document.getElementById("nav-status").innerText = "UNKNOWN";
-        document.getElementById("nav-status").style.color = "#6b7280";
+        document.getElementById("nav-status").style.color = "var(--text-muted)";
         updateBatteryDisplay(0);
         document.getElementById("robot-marker").classList.add("hidden");
         updateLocalizeStatusDisplay(false);
@@ -497,11 +555,11 @@ function updateBatteryDisplay(percentage) {
     
     // 根据电量级别改变颜色
     if (percentage > 50) {
-        bar.style.backgroundColor = "#10b981"; // 绿色
+        bar.style.backgroundColor = "var(--accent-green)";
     } else if (percentage > 20) {
-        bar.style.backgroundColor = "#f59e0b"; // 橙色
+        bar.style.backgroundColor = "var(--accent-orange)";
     } else {
-        bar.style.backgroundColor = "#ef4444"; // 红色
+        bar.style.backgroundColor = "var(--accent-red)";
     }
 }
 
@@ -516,7 +574,7 @@ function refreshMapList() {
             mapList = data;
             const select = document.getElementById("map-select");
             
-            // 保存当前选中的值，刷新后尽量恢复
+            // 刷新后恢复之前选择的值
             const prevVal = select.value;
             select.innerHTML = '<option value="">-- 请选择地图 --</option>';
             
@@ -553,7 +611,7 @@ function loadSelectedMap() {
     innerContainer.classList.add("hidden");
     loader.classList.remove("hidden");
 
-    // 调用 API 动态切图
+    // 调用后端 API 加载地图至导航系统
     fetch(`${API_BASE}/api/v1/maps/${mapName}/load`, { method: "POST" })
         .then(res => {
             if (!res.ok) return res.json().then(err => { throw new Error(err.detail || "加载失败") });
@@ -604,13 +662,13 @@ function handleMapClick(e) {
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    // 网页显示的图像尺寸和图片本身的天然尺寸
+    // 网页显示的图像尺寸和图片本身的实际物理分辨率
     const displayWidth = rect.width;
     const displayHeight = rect.height;
     const naturalWidth = img.naturalWidth;
     const naturalHeight = img.naturalHeight;
 
-    // 换算成图片的实际物理像素坐标
+    // 换算成图片的实际像素坐标
     const pixelX = clickX * (naturalWidth / displayWidth);
     const pixelY = clickY * (naturalHeight / displayHeight);
 
@@ -619,7 +677,7 @@ function handleMapClick(e) {
     const originX = currentMap.origin[0];     // 图像左下角的 ROS X 物理坐标
     const originY = currentMap.origin[1];     // 图像左下角的 ROS Y 物理坐标
 
-    // ⚠️ 转换公式：ROS 的原点在图像的 左下角 (Bottom-Left)
+    // ⚠️ 转换公式：ROS 原点在图像的左下角 (Bottom-Left)
     // 像素的 Y 轴是从上往下增长，而 ROS 物理 Y 轴是从下往上增长
     const worldX = originX + (pixelX * resolution);
     const worldY = originY + ((naturalHeight - pixelY) * resolution);
@@ -632,7 +690,7 @@ function handleMapClick(e) {
         // 单点导航模式：填入输入框并高亮提示
         document.getElementById("poi-x").value = worldX.toFixed(3);
         document.getElementById("poi-y").value = worldY.toFixed(3);
-        document.getElementById("poi-yaw").value = "0.000"; // 默认朝向设为 0
+        document.getElementById("poi-yaw").value = "0.000"; // 默认朝向设为 0.000
         showToast(`提取坐标成功: X=${worldX.toFixed(3)}, Y=${worldY.toFixed(3)}`, "success");
     }
 }
@@ -689,7 +747,6 @@ function saveCurrentPoi() {
     fetch(`${API_BASE}/api/v1/maps/${mapName}/pois`)
         .then(res => res.json())
         .then(pois => {
-            // 检查重名并覆盖
             const filtered = pois.filter(p => p.name !== name);
             filtered.push({ name, x, y, yaw });
             
@@ -702,7 +759,6 @@ function saveCurrentPoi() {
         .then(res => res.json())
         .then(() => {
             showToast(`标记点 '${name}' 已保存`, "success");
-            // 重置表单名称
             document.getElementById("poi-name").value = "";
             refreshPoiList(mapName);
         })
@@ -832,36 +888,26 @@ function deleteSchedule(id) {
 // ==========================================
 
 function setupEventListeners() {
-    // 主题切换事件
-    const themeBtn = document.getElementById("btn-theme-toggle");
-    if (themeBtn) {
-        themeBtn.addEventListener("click", toggleTheme);
-    }
-
-    // A. 刷新地图列表
+    // A. 刷新与加载地图
     document.getElementById("btn-refresh-maps").addEventListener("click", refreshMapList);
-    
-    // B. 加载选中地图
     document.getElementById("btn-load-map").addEventListener("click", loadSelectedMap);
     
-    // C. 地图点击取点
+    // B. 地图点击取点
     document.getElementById("map-image").addEventListener("click", handleMapClick);
 
-    // D. SLAM 建图控制
+    // C. SLAM 建图控制
     document.getElementById("btn-start-slam").addEventListener("click", () => {
         fetch(`${API_BASE}/api/v1/slam/start`, { method: "POST" })
             .then(res => res.json())
-            .then(data => {
-                showToast("已下发开启 SLAM 指令", "success");
-            });
+            .then(data => showToast("已下发开启 SLAM 指令", "success"))
+            .catch(() => showToast("下发 SLAM 命令失败", "error"));
     });
     
     document.getElementById("btn-stop-slam").addEventListener("click", () => {
         fetch(`${API_BASE}/api/v1/slam/stop`, { method: "POST" })
             .then(res => res.json())
-            .then(data => {
-                showToast("已下发停止 SLAM 指令", "success");
-            });
+            .then(data => showToast("已下发停止 SLAM 指令", "success"))
+            .catch(() => showToast("下发停止 SLAM 命令失败", "error"));
     });
 
     document.getElementById("btn-save-map").addEventListener("click", () => {
@@ -889,24 +935,22 @@ function setupEventListeners() {
         .catch(() => showToast("保存地图失败，确认 SLAM 是否开启", "error"));
     });
 
-    // E. 自主探索控制
+    // D. 自主探索控制
     document.getElementById("btn-start-explore").addEventListener("click", () => {
         fetch(`${API_BASE}/api/v1/explore/start`, { method: "POST" })
             .then(res => res.json())
-            .then(data => {
-                showToast("自主探索建图已开启", "success");
-            });
+            .then(data => showToast("自主探索建图已开启", "success"))
+            .catch(() => showToast("启动自主探索失败", "error"));
     });
 
     document.getElementById("btn-stop-explore").addEventListener("click", () => {
         fetch(`${API_BASE}/api/v1/explore/stop`, { method: "POST" })
             .then(res => res.json())
-            .then(data => {
-                showToast("自主探索建图已关闭", "success");
-            });
+            .then(data => showToast("自主探索建图已关闭", "success"))
+            .catch(() => showToast("关闭自主探索失败", "error"));
     });
 
-    // F. 标定保存与导航
+    // E. 标定保存与坐标前往
     document.getElementById("btn-save-poi").addEventListener("click", saveCurrentPoi);
     document.getElementById("btn-navigate-coords").addEventListener("click", navigateByInputCoords);
     document.getElementById("btn-nav-cancel").addEventListener("click", () => {
@@ -915,22 +959,22 @@ function setupEventListeners() {
             .then(() => showToast("🚨 当前导航已被紧急中止！", "error"));
     });
 
-    // G. 巡逻按键
+    // F. 巡逻控制按键
     document.getElementById("btn-patrol-start").addEventListener("click", () => sendPatrolCmd("start"));
     document.getElementById("btn-patrol-pause").addEventListener("click", () => sendPatrolCmd("pause"));
     document.getElementById("btn-patrol-resume").addEventListener("click", () => sendPatrolCmd("resume"));
     document.getElementById("btn-patrol-stop").addEventListener("click", () => sendPatrolCmd("stop"));
 
-    // H. 定时任务添加
+    // G. 定时计划添加
     document.getElementById("btn-add-schedule").addEventListener("click", addSchedule);
 
-    // I. 重定位触发
+    // H. 重定位触发
     document.getElementById("btn-auto-localize").addEventListener("click", triggerAutoLocalize);
 
-    // J. 地图缩放平移交互
+    // I. 地图缩放拖动交互
     setupMapInteraction();
 
-    // K. 仿真交互控制
+    // J. 仿真交互控制
     const btnStartSim = document.getElementById("btn-start-sim");
     const btnStopSim = document.getElementById("btn-stop-sim");
     if (btnStartSim) {
@@ -952,7 +996,7 @@ function setupEventListeners() {
         });
     }
 
-    // L. micro-ROS 代理交互控制
+    // K. micro-ROS 代理交互控制
     const btnStartAgent = document.getElementById("btn-start-agent");
     const btnStopAgent = document.getElementById("btn-stop-agent");
     if (btnStartAgent) {
@@ -980,7 +1024,7 @@ function setupEventListeners() {
         });
     }
 
-    // M. 多点航线规划按键
+    // L. 多点航线规划按键
     document.getElementById("btn-clear-waypoints").addEventListener("click", () => {
         waypointList = [];
         renderWaypointList();
@@ -988,13 +1032,13 @@ function setupEventListeners() {
     });
     document.getElementById("btn-start-waypoint-patrol").addEventListener("click", startWaypointPatrol);
 
-    // N. 历史地图库刷新按键
+    // M. 历史地图库刷新按键
     const btnRefreshGallery = document.getElementById("btn-refresh-gallery");
     if (btnRefreshGallery) {
         btnRefreshGallery.addEventListener("click", refreshMapGallery);
     }
 
-    // O. 小车轨迹控制按键
+    // N. 小车轨迹控制按键
     const btnToggleTraj = document.getElementById("btn-toggle-trajectory");
     if (btnToggleTraj) {
         btnToggleTraj.addEventListener("click", () => {
@@ -1018,11 +1062,18 @@ function setupEventListeners() {
             showToast("已清空小车历史轨迹", "info");
         });
     }
+    
+    // O. 主题切换事件
+    const themeBtn = document.getElementById("btn-theme-toggle");
+    if (themeBtn) {
+        themeBtn.addEventListener("click", toggleTheme);
+    }
 }
 
-// 弹窗提示函数
+// 弹窗提示函数 (Toast Overlay)
 function showToast(message, type = "info") {
     const toast = document.getElementById("toast");
+    if (!toast) return;
     toast.innerText = message;
     
     // 设置类型样式
@@ -1035,7 +1086,7 @@ function showToast(message, type = "info") {
     toast.style.opacity = "1";
     toast.style.transform = "translateX(-50%) translateY(0)";
 
-    // 3秒后渐隐
+    // 2.5秒后渐隐
     setTimeout(() => {
         toast.style.opacity = "0";
         toast.style.transform = "translateX(-50%) translateY(20px)";
@@ -1092,7 +1143,8 @@ function updateRobotMarkerOnMap(pose) {
         
         // 朝向角转换：ROS 的 Yaw 角弧度，在 CSS 中用度表示
         // ROS 的 Yaw 逆时针为正，而 CSS rotate 顺时针为正，所以需要取反
-        const deg = -pose.yaw * 180 / Math.PI;
+        // 小车 HMI 图标默认尖角朝上（12点钟），而 ROS 物理 Yaw=0 朝右（3点钟），需要加 90 度修正
+        const deg = -pose.yaw * 180 / Math.PI + 90;
         // 计算逆缩放比例，保持小车标识视觉大小恒定（防止地图放大时小车也跟着变大）
         const invScale = 1.0 / zoomScale;
         marker.style.transform = `translate(-50%, -50%) scale(${invScale}) rotate(${deg}deg)`;
@@ -1107,7 +1159,7 @@ function updateRobotMarkerOnMap(pose) {
     } else {
         const lastPt = robotTrajectory[robotTrajectory.length - 1];
         const dist = Math.hypot(pose.x - lastPt.x, pose.y - lastPt.y);
-        if (dist > 0.03) { // 移动超过3厘米记录一次
+        if (dist > 0.03) { // 移动超过 3 厘米记录一次
             robotTrajectory.push({ x: pose.x, y: pose.y });
             if (robotTrajectory.length > MAX_TRAJECTORY_POINTS) {
                 robotTrajectory.shift();
@@ -1217,7 +1269,7 @@ function drawPlannedPath() {
         return;
     }
     
-    // 1. 绘制带有编号的航点 Marker
+    // 1. 绘制带有编号的航点 Marker (带有逆向缩放以防视觉变形)
     waypointList.forEach((wp, index) => {
         const px = (wp.x - originX) / resolution;
         const py = naturalHeight - ((wp.y - originY) / resolution);
@@ -1240,10 +1292,10 @@ function drawPlannedPath() {
         group.appendChild(text);
     });
     
-    // 2. 生成当前状态指纹哈希（包含点位置以及小车起点位置）
+    // 2. 生成当前状态指纹哈希
     const currentHash = JSON.stringify(waypointList) + `_${currentPose?.x.toFixed(2)}_${currentPose?.y.toFixed(2)}`;
     
-    // 3. 如果指纹未改变且有精细缓存，直接以缓存重绘（如仅仅是拖拽缩放地图的情况）
+    // 3. 如果指纹未改变且有精细缓存，直接以缓存重绘
     if (currentHash === lastWaypointHash && cachedPreviewPath.length > 0) {
         drawPolylineFromPoints(polyline, cachedPreviewPath);
         return;
@@ -1288,14 +1340,17 @@ function updateLocalizeStatusDisplay(isLocalizing) {
         pulse.className = "pulse-dot active warning";
         text.innerText = "重定位中...";
         text.style.color = "var(--accent-orange)";
+        document.getElementById("dot-mcu").className = "pill-dot active warning";
     } else if (currentMap) {
         pulse.className = "pulse-dot active success";
         text.innerText = "定位就绪";
         text.style.color = "var(--accent-green)";
+        document.getElementById("dot-mcu").className = "pill-dot active success";
     } else {
         pulse.className = "pulse-dot active danger";
         text.innerText = "定位未初始化";
         text.style.color = "var(--accent-red)";
+        document.getElementById("dot-mcu").className = "pill-dot active danger";
     }
 }
 
@@ -1332,7 +1387,7 @@ function setupMapInteraction() {
     // 鼠标拖拽平移
     innerContainer.addEventListener("mousedown", (e) => {
         if (!currentMap) return;
-        if (e.button !== 0) return; // 仅允许左键拖拽
+        if (e.button !== 0) return; // 仅限左键
         isDragging = true;
         hasDragged = false;
         innerContainer.classList.add("dragging");
@@ -1361,10 +1416,10 @@ function setupMapInteraction() {
         innerContainer.classList.remove("dragging");
     });
 
-    // 手机端触摸拖拽平移
+    // 移动端触摸平移与防误触
     innerContainer.addEventListener("touchstart", (e) => {
         if (!currentMap) return;
-        if (e.touches.length !== 1) return; // 仅允许单指拖拽
+        if (e.touches.length !== 1) return;
         isDragging = true;
         hasDragged = false;
         innerContainer.classList.add("dragging");
@@ -1396,7 +1451,7 @@ function setupMapInteraction() {
         innerContainer.classList.remove("dragging");
     });
     
-    // 缩放按钮绑定
+    // 地图工具栏缩放按钮
     document.getElementById("btn-zoom-in").addEventListener("click", () => {
         if (!currentMap) return;
         zoomScale = Math.min(zoomScale + 0.25, 5.0);
@@ -1423,7 +1478,6 @@ function updateMapTransform() {
     if (container) {
         container.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
     }
-    // 地图缩放变化时，若小车在线，同步更新其逆向缩放比例以保持大小恒定
     if (currentPose) {
         updateRobotMarkerOnMap(currentPose);
     }
@@ -1459,9 +1513,11 @@ function updateMcuStatus(mcuOnline) {
     if (mcuOnline) {
         badge.innerText = "在线";
         badge.className = "status-badge online";
+        document.getElementById("dot-mcu").className = "pill-dot active success";
     } else {
         badge.innerText = "离线";
         badge.className = "status-badge offline";
+        document.getElementById("dot-mcu").className = "pill-dot active offline";
     }
 }
 
@@ -1501,6 +1557,8 @@ function toggleTheme() {
         if (btn) btn.innerText = "🌙";
         showToast("已切换至深色科技模式", "success");
     } else {
+        document.documentElement.setAttribute("data-theme", "light");
+        localStorage.setItem("theme", "light");
         if (btn) btn.innerText = "☀️";
         showToast("已切换至高雅浅色模式", "success");
     }
@@ -1516,9 +1574,8 @@ let gamepadLoopActive = false;
 let zeroSpeedSentCount = 0;
 
 function initGamepad() {
-    // 1. 监听手柄硬件拔插事件
     window.addEventListener("gamepadconnected", (e) => {
-        console.log("Gamepad connected to slot:", e.gamepad.index, e.gamepad.id);
+        console.log("Gamepad connected:", e.gamepad.index, e.gamepad.id);
         gamepadIndex = e.gamepad.index;
         updateGamepadUIStatus(e.gamepad);
         startGamepadLoop();
@@ -1526,14 +1583,13 @@ function initGamepad() {
 
     window.addEventListener("gamepaddisconnected", (e) => {
         if (gamepadIndex === e.gamepad.index) {
-            console.log("Gamepad disconnected from slot:", e.gamepad.index);
+            console.log("Gamepad disconnected:", e.gamepad.index);
             gamepadIndex = null;
             updateGamepadUIStatus(null);
             stopGamepadLoop();
         }
     });
 
-    // 2. 绑定 HMI 界面上的手柄安全使能开关
     const enableSwitch = document.getElementById("gamepad-enable-switch");
     if (enableSwitch) {
         enableSwitch.addEventListener("change", (e) => {
@@ -1543,29 +1599,34 @@ function initGamepad() {
             if (gamepadEnabled) {
                 if (gamepadIndex !== null) {
                     if (visualizer) visualizer.classList.add("joystick-active");
-                    showToast("🎮 手柄遥控已开启，请操纵摇杆", "success");
+                    showToast("🎮 手柄遥控已开启，请操纵手柄摇杆", "success");
+                    
+                    // 如果使能了手柄，安全起见把网页端遥控自动关闭
+                    const webTeleopSwitch = document.getElementById("web-teleop-enable-switch");
+                    if (webTeleopSwitch && webTeleopSwitch.checked) {
+                        webTeleopSwitch.checked = false;
+                        webTeleopSwitch.dispatchEvent(new Event("change"));
+                    }
                 } else {
-                    // 若无手柄，强行弹回开关，防止误导
                     enableSwitch.checked = false;
                     gamepadEnabled = false;
-                    showToast("⚠️ 未检测到已连手柄！请先按键激活手柄。", "error");
+                    showToast("⚠️ 未检测到已连手柄！请连接手柄并按键激活。", "error");
                 }
             } else {
                 if (visualizer) visualizer.classList.remove("joystick-active");
                 showToast("🎮 手柄遥控已安全关闭", "info");
-                // 安全刹车：关闭使能时立即发送 0 速度，确保小车停下
                 sendGamepadTeleopCommand(0.0, 0.0);
             }
         });
     }
 
-    // 3. 自动连接重试定时器：无需每次手动拔插，只要检测到有设备连接且有按键按下便自动激活
+    // 自动扫描手柄
     setInterval(() => {
         if (gamepadIndex !== null) return;
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
         for (let i = 0; i < gamepads.length; i++) {
             if (gamepads[i]) {
-                console.log("Auto-detected gamepad at slot", i, gamepads[i].id);
+                console.log("Auto-detected gamepad slot", i, gamepads[i].id);
                 gamepadIndex = gamepads[i].index;
                 updateGamepadUIStatus(gamepads[i]);
                 startGamepadLoop();
@@ -1589,11 +1650,10 @@ function updateGamepadUIStatus(gamepad) {
         }
         if (infoRow) infoRow.classList.remove("hidden");
         if (modelSpan) {
-            // 清理型号字符串，去除杂乱的厂商 ID，保持整洁
             modelSpan.innerText = gamepad.id.split(" (Vendor:")[0];
         }
         if (pulse) {
-            pulse.className = "pulse-dot active";
+            pulse.className = "pulse-dot active success";
         }
     } else {
         if (badge) {
@@ -1612,7 +1672,6 @@ function updateGamepadUIStatus(gamepad) {
             enableSwitch.checked = false;
         }
         gamepadEnabled = false;
-        // 复位摇杆球指针
         updateJoystickPointerVisual(0.0, 0.0);
     }
 }
@@ -1637,8 +1696,8 @@ function gamepadTelemetryLoop() {
 
     const gamepad = navigator.getGamepads()[gamepadIndex];
     if (gamepad) {
-        // Xbox 标准协议映射：
-        // 左摇杆上下 (axes[1]) -> 控制前进后退。向上推为负，向下为正，故取反
+        // Xbox 映射：
+        // 左摇杆上下 (axes[1]) -> 前进后退。向上推为负，向下为正，故取反
         let rawLinear = -gamepad.axes[1];
         
         // 转向优先使用右摇杆左右 (axes[2]/axes[3])，若无则使用左摇杆左右 (axes[0])
@@ -1651,7 +1710,7 @@ function gamepadTelemetryLoop() {
             rawAngular = -gamepad.axes[0];
         }
 
-        // 摇杆中位滤波死区 (Deadzone)：过滤摇杆轻微机械松动带来的微小读数
+        // 摇杆死区 deadzone
         const deadzone = 0.15;
         let linear = Math.abs(rawLinear) < deadzone ? 0.0 : rawLinear;
         let angular = Math.abs(rawAngular) < deadzone ? 0.0 : rawAngular;
@@ -1663,12 +1722,12 @@ function gamepadTelemetryLoop() {
         let linearX = linear * maxLinear;
         let angularZ = angular * maxAngular;
 
-        // 实时更新摇杆的可视化偏移小点，传入原始偏置
+        // 实时更新手柄十字摇杆偏移
         updateJoystickPointerVisual(linear, -angular);
 
         if (gamepadEnabled) {
             teleopFrameCounter++;
-            // 降频机制：限流为每 4 帧发送一次速度，约合 15Hz (60fps / 4)
+            // 限流 15Hz (60fps / 4)
             if (teleopFrameCounter % 4 === 0) {
                 sendGamepadTeleopCommand(linearX, angularZ);
             }
@@ -1684,16 +1743,15 @@ function updateJoystickPointerVisual(linear, angular) {
     const pointer = document.getElementById("joystick-pointer");
     if (!pointer) return;
 
-    // 指示盘极限像素移动范围为 40px
-    const maxOffset = 40;
+    const maxOffset = 30; // 30px
     const offsetX = angular * maxOffset;
-    const offsetY = -linear * maxOffset; // 向上偏表示前进，在屏幕Y坐标上表示负偏移
+    const offsetY = -linear * maxOffset;
 
     pointer.style.transform = `translate(calc(-50% + ${offsetX.toFixed(1)}px), calc(-50% + ${offsetY.toFixed(1)}px))`;
 }
 
 function sendGamepadTeleopCommand(linearX, angularZ) {
-    // 零速过滤：如果连续发零，发送 3 次零速度（安全刹车确认）后就不再下发，防止浪费网路队列带宽
+    // 零速限流刹车确认：如果连续下发零速，发够 3 次零速度后即行停止，节约通道带宽
     if (linearX === 0.0 && angularZ === 0.0) {
         if (zeroSpeedSentCount >= 3) {
             return;
@@ -1703,7 +1761,7 @@ function sendGamepadTeleopCommand(linearX, angularZ) {
         zeroSpeedSentCount = 0;
     }
 
-    console.log(`[Gamepad Teleop] 准备发送速度: x=${linearX.toFixed(3)}, z=${angularZ.toFixed(3)}`);
+    console.log(`[Teleop CMD] 速度发送: x=${linearX.toFixed(3)}, z=${angularZ.toFixed(3)}`);
 
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({
@@ -1712,6 +1770,248 @@ function sendGamepadTeleopCommand(linearX, angularZ) {
             angular_z: parseFloat(angularZ.toFixed(3))
         }));
     } else {
-        console.warn(`[Gamepad Teleop] WebSocket 未连接或处于非开启状态，无法下发控制命令。当前 WebSocket 状态: ${socket ? socket.readyState : 'null'}`);
+        console.warn(`[Teleop CMD] WebSocket 未就绪。底盘状态: ${socket ? socket.readyState : 'null'}`);
+    }
+}
+
+// ==========================================
+// 12. 新增：网页端虚拟摇杆 & 键盘遥控逻辑 (Web Teleop Cabin)
+// ==========================================
+
+let joystickActive = false;
+let joystickX = 0;
+let joystickY = 0;
+const joystickMaxRadius = 38; // px
+
+let webTeleopLoopActive = false;
+let webTeleopFrameCounter = 0;
+
+let pressedKeys = {
+    w: false, a: false, s: false, d: false,
+    ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
+};
+
+// A. 初始化网页虚拟摇杆手势
+function initVirtualJoystick() {
+    const base = document.getElementById("joystick-base");
+    const handle = document.getElementById("joystick-handle");
+    const webTeleopSwitch = document.getElementById("web-teleop-enable-switch");
+
+    if (!base || !handle) return;
+
+    function handleStart(e) {
+        if (!webTeleopSwitch.checked) return;
+        joystickActive = true;
+        updateJoystickPosition(e);
+        e.preventDefault();
+    }
+
+    function handleMove(e) {
+        if (!joystickActive) return;
+        updateJoystickPosition(e);
+        e.preventDefault();
+    }
+
+    function handleEnd() {
+        if (!joystickActive) return;
+        joystickActive = false;
+        joystickX = 0;
+        joystickY = 0;
+        handle.style.transform = `translate(0px, 0px)`;
+    }
+
+    function updateJoystickPosition(e) {
+        const rect = base.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        let clientX = 0;
+        let clientY = 0;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        const deltaX = clientX - centerX;
+        const deltaY = clientY - centerY;
+        const distance = Math.hypot(deltaX, deltaY);
+
+        if (distance <= joystickMaxRadius) {
+            joystickX = deltaX;
+            joystickY = deltaY;
+        } else {
+            const angle = Math.atan2(deltaY, deltaX);
+            joystickX = Math.cos(angle) * joystickMaxRadius;
+            joystickY = Math.sin(angle) * joystickMaxRadius;
+        }
+
+        handle.style.transform = `translate(${joystickX.toFixed(1)}px, ${joystickY.toFixed(1)}px)`;
+    }
+
+    // 绑定事件
+    base.addEventListener("mousedown", handleStart);
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleEnd);
+
+    base.addEventListener("touchstart", handleStart, { passive: false });
+    window.addEventListener("touchmove", handleMove, { passive: false });
+    window.addEventListener("touchend", handleEnd);
+}
+
+// B. 初始化网页键盘监听
+function initKeyboardTeleop() {
+    const webTeleopSwitch = document.getElementById("web-teleop-enable-switch");
+    if (!webTeleopSwitch) return;
+
+    webTeleopSwitch.addEventListener("change", (e) => {
+        const isChecked = e.target.checked;
+        if (isChecked) {
+            showToast("🎮 网页遥控已使能，支持虚拟摇杆与 WASD 键盘操作", "success");
+            
+            // 安全机制：使能网页控制时，自动将物理 Xbox 遥控关闭，防止信号冲突
+            const gamepadSwitch = document.getElementById("gamepad-enable-switch");
+            if (gamepadSwitch && gamepadSwitch.checked) {
+                gamepadSwitch.checked = false;
+                gamepadSwitch.dispatchEvent(new Event("change"));
+            }
+            
+            startWebTeleopLoop();
+        } else {
+            showToast("🎮 网页遥控已关闭", "info");
+            stopWebTeleopLoop();
+            
+            // 复位键盘按键的高亮状态
+            resetKeyboardVisualKeys();
+            // 刹车
+            sendGamepadTeleopCommand(0.0, 0.0);
+        }
+    });
+
+    window.addEventListener("keydown", (e) => {
+        if (!webTeleopSwitch.checked) return;
+        // 如果焦点在输入框中，不能触发键盘遥控
+        if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "SELECT")) {
+            return;
+        }
+
+        const key = e.key.toLowerCase();
+        if (e.key === "w" || e.key === "ArrowUp") {
+            pressedKeys.w = true; pressedKeys.ArrowUp = true;
+            highlightKey("key-w", true);
+            e.preventDefault();
+        } else if (e.key === "s" || e.key === "ArrowDown") {
+            pressedKeys.s = true; pressedKeys.ArrowDown = true;
+            highlightKey("key-s", true);
+            e.preventDefault();
+        } else if (e.key === "a" || e.key === "ArrowLeft") {
+            pressedKeys.a = true; pressedKeys.ArrowLeft = true;
+            highlightKey("key-a", true);
+            e.preventDefault();
+        } else if (e.key === "d" || e.key === "ArrowRight") {
+            pressedKeys.d = true; pressedKeys.ArrowRight = true;
+            highlightKey("key-d", true);
+            e.preventDefault();
+        }
+    });
+
+    window.addEventListener("keyup", (e) => {
+        if (!webTeleopSwitch.checked) return;
+
+        if (e.key === "w" || e.key === "ArrowUp") {
+            pressedKeys.w = false; pressedKeys.ArrowUp = false;
+            highlightKey("key-w", false);
+        } else if (e.key === "s" || e.key === "ArrowDown") {
+            pressedKeys.s = false; pressedKeys.ArrowDown = false;
+            highlightKey("key-s", false);
+        } else if (e.key === "a" || e.key === "ArrowLeft") {
+            pressedKeys.a = false; pressedKeys.ArrowLeft = false;
+            highlightKey("key-a", false);
+        } else if (e.key === "d" || e.key === "ArrowRight") {
+            pressedKeys.d = false; pressedKeys.ArrowRight = false;
+            highlightKey("key-d", false);
+        }
+    });
+}
+
+function highlightKey(keyId, active) {
+    const el = document.getElementById(keyId);
+    if (!el) return;
+    if (active) {
+        el.classList.add("active");
+    } else {
+        el.classList.remove("active");
+    }
+}
+
+function resetKeyboardVisualKeys() {
+    pressedKeys = {
+        w: false, a: false, s: false, d: false,
+        ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
+    };
+    highlightKey("key-w", false);
+    highlightKey("key-a", false);
+    highlightKey("key-s", false);
+    highlightKey("key-d", false);
+}
+
+function startWebTeleopLoop() {
+    if (!webTeleopLoopActive) {
+        webTeleopLoopActive = true;
+        requestAnimationFrame(webTeleopLoop);
+    }
+}
+
+function stopWebTeleopLoop() {
+    webTeleopLoopActive = false;
+}
+
+function webTeleopLoop() {
+    const webTeleopSwitch = document.getElementById("web-teleop-enable-switch");
+    if (!webTeleopSwitch || !webTeleopSwitch.checked) {
+        webTeleopLoopActive = false;
+        return;
+    }
+
+    let linearX = 0.0;
+    let angularZ = 0.0;
+
+    // 1. 如果处于摇杆操作状态，优先执行摇杆遥控值
+    if (joystickActive) {
+        // joystickY 向上为负，前进为正，取反
+        const rawLinear = -joystickY / joystickMaxRadius;
+        // joystickX 向左为负，左转为正（逆时针 Yaw），取反
+        const rawAngular = -joystickX / joystickMaxRadius;
+
+        linearX = rawLinear * 0.45;
+        angularZ = rawAngular * 1.20;
+    } else {
+        // 2. 否则执行键盘按键遥控值
+        let keyLinear = 0.0;
+        let keyAngular = 0.0;
+
+        if (pressedKeys.w || pressedKeys.ArrowUp) keyLinear += 1.0;
+        if (pressedKeys.s || pressedKeys.ArrowDown) keyLinear -= 1.0;
+        if (pressedKeys.a || pressedKeys.ArrowLeft) keyAngular += 1.0;
+        if (pressedKeys.d || pressedKeys.ArrowRight) keyAngular -= 1.0;
+
+        linearX = keyLinear * 0.45;
+        angularZ = keyAngular * 1.20;
+    }
+
+    // 限幅裁剪约束
+    linearX = Math.min(Math.max(linearX, -0.45), 0.45);
+    angularZ = Math.min(Math.max(angularZ, -1.20), 1.20);
+
+    webTeleopFrameCounter++;
+    // 限流 15Hz (每 4 帧下发一次)
+    if (webTeleopFrameCounter % 4 === 0) {
+        sendGamepadTeleopCommand(linearX, angularZ);
+    }
+
+    if (webTeleopLoopActive) {
+        requestAnimationFrame(webTeleopLoop);
     }
 }

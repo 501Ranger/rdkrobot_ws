@@ -30,3 +30,11 @@ class NavGoPayload(BaseModel):
     y: float = Field(None, description="目标物理 y 坐标")
     yaw: float = Field(0.0, description="目标物理 yaw 角度")
     poi_name: str = Field(None, description="语义点名称（若提供此参数，则忽略 x, y, yaw 并匹配该点的坐标）")
+
+class HardwareInitPayload(BaseModel):
+    agent_port: str = Field(None, description="micro-ROS 串口号")
+    lidar_port: str = Field(None, description="雷达驱动串口号")
+
+class BluetoothConnectPayload(BaseModel):
+    mac: str = Field(..., description="蓝牙设备的 MAC 地址")
+

@@ -62,3 +62,4 @@ if os.path.exists(config_path):
 workspace_dir = os.path.dirname(os.path.dirname(WORKSPACE_SETUP_BASH))
 MAPS_DIR = os.path.join(workspace_dir, "maps")
 current_map_name = None
+CONFIG_PATH = config_path

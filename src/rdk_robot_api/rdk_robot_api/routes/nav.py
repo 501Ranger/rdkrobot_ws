@@ -41,9 +41,14 @@ async def compute_path_segment(ros_node, start_pose, goal_pose) -> list:
     # 发送目标
     future = ros_node.compute_path_client.send_goal_async(goal_msg)
     
+    import time
     # 异步非阻塞等待目标响应
+    start_time = time.time()
     while not future.done():
         await asyncio.sleep(0.02)
+        if time.time() - start_time > 5.0:
+            ros_node.get_logger().warn("Timeout waiting for ComputePathToPose goal response.")
+            return None
         
     goal_handle = future.result()
     if not goal_handle.accepted:
@@ -52,8 +57,12 @@ async def compute_path_segment(ros_node, start_pose, goal_pose) -> list:
 
     # 异步非阻塞等待结果
     result_future = goal_handle.get_result_async()
+    start_time = time.time()
     while not result_future.done():
         await asyncio.sleep(0.02)
+        if time.time() - start_time > 10.0:
+            ros_node.get_logger().warn("Timeout waiting for ComputePathToPose result.")
+            return None
 
     action_result = result_future.result()
     # status 4 为 SUCCEEDED
@@ -95,7 +104,8 @@ async def preview_patrol_path(payload: TaskPayload):
         poses.append(pose)
 
     # 2. 提取当前机器人位姿作为首段起点
-    curr_pose_dict = rn.ros_node.robot_pose
+    status_data = rn.ros_node.get_robot_status_data()
+    curr_pose_dict = status_data["pose"]
     curr_pose = Pose()
     curr_pose.position.x = curr_pose_dict["x"]
     curr_pose.position.y = curr_pose_dict["y"]

@@ -37,6 +37,8 @@ sim_process = None
 agent_process = None
 base_process = None
 lidar_process = None
+joy_process = None
+
 
 # 定时巡逻触发事件广播标志
 scheduled_patrol_triggered = False
@@ -45,6 +47,15 @@ scheduled_patrol_triggered = False
 waypoint_reached_index = 0
 patrol_completed_triggered = False
 patrol_interrupted_reason = ""
+
+def check_and_reset_process(process, name):
+    if process is not None:
+        if process.poll() is not None:
+            from . import ros_node as rn
+            if rn.ros_node:
+                rn.ros_node.get_logger().warn(f"Process [{name}] exited with code {process.poll()}")
+            return None
+    return process
 
 def terminate_process_group(process):
     """安全中止进程及其全部子进程组"""
@@ -67,23 +78,39 @@ def terminate_process_group(process):
 async def broadcast_status_loop():
     from . import ros_node as rn # 延迟导入，防止循环引用
     from . import manager as m
+    global slam_process, explore_process, loc_process, nav2_process, sim_process, agent_process, base_process, lidar_process, joy_process
     while True:
         if rn.ros_node:
             try:
+                # 线程安全地一次性提取所有实时数据包
+                status_dict = rn.ros_node.get_robot_status_data()
+
                 current_time = time.time()
-                mcu_online = (current_time - rn.ros_node.last_battery_time < 3.0) or \
-                             (current_time - rn.ros_node.last_odom_time < 3.0)
+                mcu_online = (current_time - status_dict["last_battery_time"] < 3.0) or \
+                             (current_time - status_dict["last_odom_time"] < 3.0)
                 
-                slam_running = (m.slam_process is not None) and (m.slam_process.poll() is None)
-                explore_running = (m.explore_process is not None) and (m.explore_process.poll() is None)
+                # 监控子进程存活并重置已退出进程
+                m.slam_process = check_and_reset_process(m.slam_process, "slam")
+                m.explore_process = check_and_reset_process(m.explore_process, "explore")
+                m.loc_process = check_and_reset_process(m.loc_process, "localization")
+                m.nav2_process = check_and_reset_process(m.nav2_process, "nav2")
+                m.sim_process = check_and_reset_process(m.sim_process, "sim")
+                m.agent_process = check_and_reset_process(m.agent_process, "agent")
+                m.base_process = check_and_reset_process(m.base_process, "base")
+                m.lidar_process = check_and_reset_process(m.lidar_process, "lidar")
+                m.joy_process = check_and_reset_process(m.joy_process, "joy")
+
+                slam_running = (m.slam_process is not None)
+                explore_running = (m.explore_process is not None)
                 
                 # 检测 micro-ROS 代理是否在运行
                 agent_res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
-                agent_running = (agent_res == 0) or ((m.agent_process is not None) and (m.agent_process.poll() is None))
+                agent_running = (agent_res == 0) or (m.agent_process is not None)
                 
-                sim_running = (m.sim_process is not None) and (m.sim_process.poll() is None)
-                base_running = (m.base_process is not None) and (m.base_process.poll() is None)
-                lidar_running = (m.lidar_process is not None) and (m.lidar_process.poll() is None)
+                sim_running = (m.sim_process is not None)
+                base_running = (m.base_process is not None)
+                lidar_running = (m.lidar_process is not None)
+                joy_running = (m.joy_process is not None)
                 
                 triggered = m.scheduled_patrol_triggered
                 if triggered:
@@ -113,14 +140,16 @@ async def broadcast_status_loop():
                     if rn.ros_node.map_sub is not None:
                         rn.ros_node.destroy_subscription(rn.ros_node.map_sub)
                         rn.ros_node.map_sub = None
-                        rn.ros_node.realtime_map_data = None
+                        # 重置 realtime_map_data 需要在锁保护下进行
+                        with rn.ros_node._lock:
+                            rn.ros_node.realtime_map_data = None
                         rn.ros_node.get_logger().info("Unsubscribed from /map.")
 
                 status_data = {
-                    "battery_percentage": round(rn.ros_node.battery_pct, 1),
-                    "pose": rn.ros_node.robot_pose,
-                    "is_localizing": rn.ros_node.is_localizing,
-                    "nav_status": rn.ros_node.nav_status,
+                    "battery_percentage": status_dict["battery_percentage"],
+                    "pose": status_dict["pose"],
+                    "is_localizing": status_dict["is_localizing"],
+                    "nav_status": status_dict["nav_status"],
                     "mcu_online": mcu_online,
                     "slam_running": slam_running,
                     "explore_running": explore_running,
@@ -128,12 +157,14 @@ async def broadcast_status_loop():
                     "sim_running": sim_running,
                     "base_running": base_running,
                     "lidar_running": lidar_running,
-                    "nav2_plan": rn.ros_node.nav2_path,
+                    "joy_running": joy_running,
+                    "joy_unlocked": status_dict.get("joy_unlocked", False),
+                    "nav2_plan": status_dict["nav2_path"],
                     "scheduled_patrol_triggered": triggered,
                     "waypoint_reached": reached_idx,
                     "patrol_completed": completed_triggered,
                     "patrol_interrupted": interrupted_reason,
-                    "realtime_map": rn.ros_node.realtime_map_data
+                    "realtime_map": status_dict["realtime_map"]
                 }
                 await manager.broadcast(status_data)
             except Exception:

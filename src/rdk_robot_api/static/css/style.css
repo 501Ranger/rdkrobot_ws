@@ -272,6 +272,15 @@ body {
 .status-badge.offline {
     color: var(--accent-red);
 }
+.status-badge.warning {
+    color: var(--accent-orange);
+    animation: text-warning-glow 2.0s infinite ease-in-out;
+}
+
+@keyframes text-warning-glow {
+    0%, 100% { opacity: 1; text-shadow: 0 0 1px rgba(245, 158, 11, 0.3); }
+    50% { opacity: 0.65; text-shadow: 0 0 8px rgba(245, 158, 11, 0.8); }
+}
 
 .battery-pill {
     display: flex;
@@ -2442,4 +2451,47 @@ input:checked + .slider:before {
         padding: 10px;
         font-size: 0.85rem;
     }
+}
+
+/* 系统看板卡片样式 */
+.system-status-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 6px 0;
+}
+.system-status-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.status-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+.status-item-label {
+    color: var(--text-secondary);
+}
+.status-item-value {
+    font-weight: 600;
+    color: var(--accent-cyan);
+}
+.status-progress-track {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+.status-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 4px;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 8px var(--accent-cyan-glow);
+    transition: width 0.4s cubic-bezier(0.1, 0.8, 0.25, 1);
 }

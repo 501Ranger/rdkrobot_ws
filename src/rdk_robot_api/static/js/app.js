@@ -87,11 +87,15 @@ document.addEventListener("DOMContentLoaded", () => {
     initVirtualJoystick();
     initKeyboardTeleop();
 
-    // 3. 初始化蓝牙游戏手柄
-    initGamepad();
+    // 3. 初始化主机蓝牙手柄管理
+    initHostGamepad();
 
-    // 4. 检测系统环境是否为 ARM 以展示或隐藏仿真控制
+    // 4. 检测系统环境是否为 ARM 以展示或隐藏仿真控制并刷新平台型号
     checkSystemInfo();
+
+    // 4.1 开启上位机系统性能实时监视轮询并获取一次可用串口列表
+    startSystemStatusPolling();
+    refreshAvailableSerialPorts();
 
     // 5. 初始化拉取各接口数据
     refreshMapList();
@@ -348,8 +352,15 @@ function updateTelemetry(data) {
         btnStopExplore.classList.add("hidden");
     }
 
-    // 更新 micro-ROS 代理按钮状态
-    updateAgentButtonStates(data.agent_running);
+    // 初始化串口文本框默认值（如果为空）
+    const inputAgentPort = document.getElementById("input-agent-port");
+    const inputLidarPort = document.getElementById("input-lidar-port");
+    if (inputAgentPort && data.agent_port && !inputAgentPort.value) {
+        inputAgentPort.value = data.agent_port;
+    }
+    if (inputLidarPort && data.lidar_port && !inputLidarPort.value) {
+        inputLidarPort.value = data.lidar_port;
+    }
 
     // 更新 Gazebo 仿真按钮状态
     const btnStartSim = document.getElementById("btn-start-sim");
@@ -361,6 +372,32 @@ function updateTelemetry(data) {
         } else {
             btnStartSim.classList.remove("hidden");
             btnStopSim.classList.add("hidden");
+        }
+    }
+
+    // 更新主机 Joy 驱动开关状态与手柄解锁保护使能状态
+    const hostJoySwitch = document.getElementById("host-joy-enable-switch");
+    if (hostJoySwitch) {
+        hostJoySwitch.checked = !!data.joy_running;
+    }
+
+    const gamepadBadge = document.getElementById("gamepad-status-badge");
+    const isGamepadConnected = gamepadBadge && gamepadBadge.classList.contains("online");
+    const lockRow = document.getElementById("gamepad-lock-row");
+    const lockBadge = document.getElementById("gamepad-lock-badge");
+
+    if (lockRow && lockBadge) {
+        if (data.joy_running && isGamepadConnected) {
+            lockRow.classList.remove("hidden");
+            if (data.joy_unlocked) {
+                lockBadge.innerText = "已就绪 (READY)";
+                lockBadge.className = "status-badge online";
+            } else {
+                lockBadge.innerText = "已锁定 (按 LT/RT 解锁)";
+                lockBadge.className = "status-badge warning";
+            }
+        } else {
+            lockRow.classList.add("hidden");
         }
     }
 }
@@ -1064,6 +1101,16 @@ function deleteSchedule(id) {
 // ==========================================
 
 function setupEventListeners() {
+    // 0. 串口文本框聚焦时自动重新扫描并刷新可用列表
+    const inputAgentPort = document.getElementById("input-agent-port");
+    const inputLidarPort = document.getElementById("input-lidar-port");
+    if (inputAgentPort) {
+        inputAgentPort.addEventListener("focus", refreshAvailableSerialPorts);
+    }
+    if (inputLidarPort) {
+        inputLidarPort.addEventListener("focus", refreshAvailableSerialPorts);
+    }
+
     // A. 刷新与加载地图
     document.getElementById("btn-refresh-maps").addEventListener("click", refreshMapList);
     document.getElementById("btn-load-map").addEventListener("click", loadSelectedMap);
@@ -1075,9 +1122,15 @@ function setupEventListeners() {
     const btnInitHardware = document.getElementById("btn-init-hardware");
     if (btnInitHardware) {
         btnInitHardware.addEventListener("click", () => {
+            const agentPort = document.getElementById("input-agent-port")?.value?.trim() || "";
+            const lidarPort = document.getElementById("input-lidar-port")?.value?.trim() || "";
             showToast("正在一键初始化实机硬件，启动底盘与雷达...", "info");
             showLoading("正在一键初始化实机硬件，启动底盘与雷达...");
-            fetch(`${API_BASE}/api/v1/robot/hardware/init`, { method: "POST" })
+            fetch(`${API_BASE}/api/v1/robot/hardware/init`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_port: agentPort, lidar_port: lidarPort })
+            })
                 .then(res => res.json())
                 .then(data => {
                     hideLoading();
@@ -1090,6 +1143,28 @@ function setupEventListeners() {
                 .catch(() => {
                     hideLoading();
                     showToast("下发硬件初始化命令失败", "error");
+                });
+        });
+    }
+
+    const btnStopHardware = document.getElementById("btn-stop-hardware");
+    if (btnStopHardware) {
+        btnStopHardware.addEventListener("click", () => {
+            showToast("正在停用实机底层硬件驱动...", "info");
+            showLoading("正在停用实机底层硬件驱动...");
+            fetch(`${API_BASE}/api/v1/robot/hardware/stop`, { method: "POST" })
+                .then(res => res.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.status === "success") {
+                        showToast("实机底层硬件驱动已全部停用", "success");
+                    } else {
+                        showToast("停用失败：" + data.details.join(", "), "error");
+                    }
+                })
+                .catch(() => {
+                    hideLoading();
+                    showToast("下发停用命令失败", "error");
                 });
         });
     }
@@ -1285,33 +1360,7 @@ function setupEventListeners() {
         });
     }
 
-    // K. micro-ROS 代理交互控制
-    const btnStartAgent = document.getElementById("btn-start-agent");
-    const btnStopAgent = document.getElementById("btn-stop-agent");
-    if (btnStartAgent) {
-        btnStartAgent.addEventListener("click", () => {
-            showToast("正在启动 micro-ROS 代理...", "info");
-            fetch(`${API_BASE}/api/v1/agent/start`, { method: "POST" })
-                .then(res => res.json())
-                .then(data => {
-                    showToast("micro-ROS 代理启动成功", "success");
-                    updateAgentButtonStates(true);
-                })
-                .catch(() => showToast("启动 micro-ROS 代理失败", "error"));
-        });
-    }
-    if (btnStopAgent) {
-        btnStopAgent.addEventListener("click", () => {
-            showToast("正在关闭 micro-ROS 代理...", "info");
-            fetch(`${API_BASE}/api/v1/agent/stop`, { method: "POST" })
-                .then(res => res.json())
-                .then(data => {
-                    showToast("micro-ROS 代理已成功关闭", "success");
-                    updateAgentButtonStates(false);
-                })
-                .catch(() => showToast("关闭 micro-ROS 代理失败", "error"));
-        });
-    }
+
 
     // L. 多点航线规划按键
     document.getElementById("btn-clear-waypoints").addEventListener("click", () => {
@@ -1883,6 +1932,10 @@ function checkSystemInfo() {
                 if (simDivider) simDivider.classList.remove("hidden");
                 console.log("Running on non-ARM host. Showing simulation controls.");
             }
+            const hwSpan = document.getElementById("system-hardware-val");
+            if (hwSpan && data.hardware_platform) {
+                hwSpan.innerText = data.hardware_platform;
+            }
         })
         .catch(err => console.error("Failed to query system info", err));
 }
@@ -1945,213 +1998,193 @@ function toggleTheme() {
 }
 
 // ==========================================
-// 11. 蓝牙游戏手柄遥控交互 (Gamepad Bluetooth HMI)
+// 11. 主机蓝牙手柄与 Joy 服务管理交互 (Host Gamepad Bluetooth Control)
 // ==========================================
+function initHostGamepad() {
+    const btnScan = document.getElementById("btn-scan-bluetooth");
+    const btnConnect = document.getElementById("btn-connect-bluetooth");
+    const btnDisconnect = document.getElementById("btn-disconnect-bluetooth");
+    const deviceSelect = document.getElementById("bluetooth-device-select");
+    const joySwitch = document.getElementById("host-joy-enable-switch");
 
-let gamepadIndex = null;
-let gamepadEnabled = false;
-let gamepadLoopActive = false;
-let zeroSpeedSentCount = 0;
+    // A. 初始化并启动定时拉取主机蓝牙状态
+    refreshHostBluetoothStatus();
+    setInterval(refreshHostBluetoothStatus, 5000); // 5秒轻量轮询
 
-function initGamepad() {
-    window.addEventListener("gamepadconnected", (e) => {
-        console.log("Gamepad connected:", e.gamepad.index, e.gamepad.id);
-        gamepadIndex = e.gamepad.index;
-        updateGamepadUIStatus(e.gamepad);
-        startGamepadLoop();
-    });
-
-    window.addEventListener("gamepaddisconnected", (e) => {
-        if (gamepadIndex === e.gamepad.index) {
-            console.log("Gamepad disconnected:", e.gamepad.index);
-            gamepadIndex = null;
-            updateGamepadUIStatus(null);
-            stopGamepadLoop();
-        }
-    });
-
-    const enableSwitch = document.getElementById("gamepad-enable-switch");
-    if (enableSwitch) {
-        enableSwitch.addEventListener("change", (e) => {
-            gamepadEnabled = e.target.checked;
-            const visualizer = document.querySelector(".gamepad-joystick-visualizer");
+    // B. 扫描蓝牙设备
+    if (btnScan) {
+        btnScan.addEventListener("click", () => {
+            btnScan.disabled = true;
+            btnScan.innerText = "扫描中...";
+            showToast("正在通过主机扫描附近的蓝牙设备，需 4 秒，请稍候...", "info");
             
-            if (gamepadEnabled) {
-                if (gamepadIndex !== null) {
-                    if (visualizer) visualizer.classList.add("joystick-active");
-                    showToast("🎮 手柄遥控已开启，请操纵手柄摇杆", "success");
+            fetch(`${API_BASE}/api/v1/system/bluetooth/scan`, { method: "POST" })
+                .then(res => {
+                    if (!res.ok) throw new Error("扫描请求失败");
+                    return res.json();
+                })
+                .then(data => {
+                    btnScan.disabled = false;
+                    btnScan.innerText = "🔍 扫描";
                     
-                    // 如果使能了手柄，安全起见把网页端遥控自动关闭
-                    const webTeleopSwitch = document.getElementById("web-teleop-enable-switch");
-                    if (webTeleopSwitch && webTeleopSwitch.checked) {
-                        webTeleopSwitch.checked = false;
-                        webTeleopSwitch.dispatchEvent(new Event("change"));
+                    if (data.status === "success") {
+                        if (deviceSelect) {
+                            deviceSelect.innerHTML = '<option value="">-- 请选择设备 --</option>';
+                            const devices = data.devices || [];
+                            if (devices.length === 0) {
+                                showToast("附近未发现可连接的蓝牙设备，请长按手柄配对键使其闪烁", "warning");
+                                return;
+                            }
+                            devices.forEach(dev => {
+                                const opt = document.createElement("option");
+                                opt.value = dev.mac;
+                                opt.innerText = `${dev.name} (${dev.mac})`;
+                                deviceSelect.appendChild(opt);
+                            });
+                            showToast(`成功发现附近 ${devices.length} 个蓝牙设备！`, "success");
+                        }
+                    } else {
+                        showToast(`扫描失败: ${data.message || "未知错误"}`, "error");
                     }
-                } else {
-                    enableSwitch.checked = false;
-                    gamepadEnabled = false;
-                    showToast("⚠️ 未检测到已连手柄！请连接手柄并按键激活。", "error");
-                }
-            } else {
-                if (visualizer) visualizer.classList.remove("joystick-active");
-                showToast("🎮 手柄遥控已安全关闭", "info");
-                sendGamepadTeleopCommand(0.0, 0.0);
-            }
+                })
+                .catch(err => {
+                    btnScan.disabled = false;
+                    btnScan.innerText = "🔍 扫描";
+                    showToast(`扫描发生异常: ${err.message}`, "error");
+                });
         });
     }
 
-    // 自动扫描手柄
-    setInterval(() => {
-        if (gamepadIndex !== null) return;
-        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-        for (let i = 0; i < gamepads.length; i++) {
-            if (gamepads[i]) {
-                console.log("Auto-detected gamepad slot", i, gamepads[i].id);
-                gamepadIndex = gamepads[i].index;
-                updateGamepadUIStatus(gamepads[i]);
-                startGamepadLoop();
-                break;
+    // C. 配对信任并连接蓝牙设备
+    if (btnConnect) {
+        btnConnect.addEventListener("click", () => {
+            if (!deviceSelect || !deviceSelect.value) {
+                showToast("请先在下拉推荐列表中选择要连接的蓝牙设备", "warning");
+                return;
             }
-        }
-    }, 1000);
+            const mac = deviceSelect.value;
+            showLoading("正在与手柄进行配对和建立信任，请稍候...");
+            
+            fetch(`${API_BASE}/api/v1/system/bluetooth/connect`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mac: mac })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error("连接请求被拒绝");
+                return res.json();
+            })
+            .then(data => {
+                hideLoading();
+                if (data.status === "success") {
+                    showToast(data.message, "success");
+                    refreshHostBluetoothStatus();
+                } else {
+                    showToast(`连接失败: ${data.message}`, "error");
+                }
+            })
+            .catch(err => {
+                hideLoading();
+                showToast(`建立连接异常: ${err.message}`, "error");
+            });
+        });
+    }
+
+    // D. 断开连接并清除配对记录与信任
+    if (btnDisconnect) {
+        btnDisconnect.addEventListener("click", () => {
+            const selectMac = deviceSelect ? deviceSelect.value : "";
+            
+            // 先通过 status 获取当前连上的 mac 自动执行断开
+            fetch(`${API_BASE}/api/v1/system/bluetooth/status`)
+                .then(res => res.json())
+                .then(data => {
+                    const mac = selectMac || data.mac;
+                    if (!mac) {
+                        showToast("当前主机未连接手柄，且下拉列表中未选择设备", "warning");
+                        return;
+                    }
+                    if (confirm("⚠️ 确定要断开手柄吗？这会同时清除主机的配对与信任，防止下次自动连。")) {
+                        showLoading("正在断开并清理设备配对...");
+                        fetch(`${API_BASE}/api/v1/system/bluetooth/disconnect`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ mac: mac })
+                        })
+                        .then(res => {
+                            if (!res.ok) throw new Error("断开请求被拒绝");
+                            return res.json();
+                        })
+                        .then(data => {
+                            hideLoading();
+                            if (data.status === "success") {
+                                showToast(data.message, "success");
+                                refreshHostBluetoothStatus();
+                            } else {
+                                showToast(`断开清理失败: ${data.message}`, "error");
+                            }
+                        })
+                        .catch(err => {
+                            hideLoading();
+                            showToast(`断开清理异常: ${err.message}`, "error");
+                        });
+                    }
+                });
+        });
+    }
+
+    // E. 主机 Joy 驱动服务开关控制
+    if (joySwitch) {
+        joySwitch.addEventListener("change", (e) => {
+            const checked = e.target.checked;
+            const apiPath = checked ? "/api/v1/robot/joy/start" : "/api/v1/robot/joy/stop";
+            
+            fetch(`${API_BASE}${apiPath}`, { method: "POST" })
+                .then(res => {
+                    if (!res.ok) return res.json().then(err => { throw new Error(err.detail || "操作失败") });
+                    return res.json();
+                })
+                .then(data => {
+                    showToast(data.detail, "success");
+                })
+                .catch(err => {
+                    joySwitch.checked = !checked; // 恢复之前的状态
+                    showToast(`主机 Joy 驱动控制失败: ${err.message}`, "error");
+                });
+        });
+    }
 }
 
-function updateGamepadUIStatus(gamepad) {
+function refreshHostBluetoothStatus() {
     const badge = document.getElementById("gamepad-status-badge");
     const infoRow = document.getElementById("gamepad-info-row");
     const modelSpan = document.getElementById("gamepad-model");
     const pulse = document.getElementById("gamepad-pulse");
-    const visualizer = document.querySelector(".gamepad-joystick-visualizer");
 
-    if (gamepad) {
-        if (badge) {
-            badge.innerText = "已连接";
-            badge.className = "status-badge online";
-        }
-        if (infoRow) infoRow.classList.remove("hidden");
-        if (modelSpan) {
-            modelSpan.innerText = gamepad.id.split(" (Vendor:")[0];
-        }
-        if (pulse) {
-            pulse.className = "pulse-dot active success";
-        }
-    } else {
-        if (badge) {
-            badge.innerText = "未连接";
-            badge.className = "status-badge offline";
-        }
-        if (infoRow) infoRow.classList.add("hidden");
-        if (pulse) {
-            pulse.className = "pulse-dot";
-        }
-        if (visualizer) {
-            visualizer.classList.remove("joystick-active");
-        }
-        const enableSwitch = document.getElementById("gamepad-enable-switch");
-        if (enableSwitch) {
-            enableSwitch.checked = false;
-        }
-        gamepadEnabled = false;
-        updateJoystickPointerVisual(0.0, 0.0);
-    }
-}
-
-function startGamepadLoop() {
-    if (!gamepadLoopActive) {
-        gamepadLoopActive = true;
-        requestAnimationFrame(gamepadTelemetryLoop);
-    }
-}
-
-function stopGamepadLoop() {
-    gamepadLoopActive = false;
-}
-
-let teleopFrameCounter = 0;
-function gamepadTelemetryLoop() {
-    if (gamepadIndex === null) {
-        gamepadLoopActive = false;
-        return;
-    }
-
-    const gamepad = navigator.getGamepads()[gamepadIndex];
-    if (gamepad) {
-        // Xbox 映射：
-        // 左摇杆上下 (axes[1]) -> 前进后退。向上推为负，向下为正，故取反
-        let rawLinear = -gamepad.axes[1];
-        
-        // 转向优先使用右摇杆左右 (axes[2]/axes[3])，若无则使用左摇杆左右 (axes[0])
-        let rawAngular = 0.0;
-        if (typeof gamepad.axes[3] !== 'undefined' && Math.abs(gamepad.axes[3]) > 0.05) {
-            rawAngular = -gamepad.axes[3];
-        } else if (typeof gamepad.axes[2] !== 'undefined' && Math.abs(gamepad.axes[2]) > 0.05) {
-            rawAngular = -gamepad.axes[2];
-        } else if (typeof gamepad.axes[0] !== 'undefined') {
-            rawAngular = -gamepad.axes[0];
-        }
-
-        // 摇杆死区 deadzone
-        const deadzone = 0.15;
-        let linear = Math.abs(rawLinear) < deadzone ? 0.0 : rawLinear;
-        let angular = Math.abs(rawAngular) < deadzone ? 0.0 : rawAngular;
-
-        // 物理上限约束映射：线速度最大 0.45 m/s，角速度最大 2.50 rad/s
-        const maxLinear = 0.45;
-        const maxAngular = 2.50;
-        
-        let linearX = linear * maxLinear;
-        let angularZ = angular * maxAngular;
-
-        // 实时更新手柄十字摇杆偏移
-        updateJoystickPointerVisual(linear, -angular);
-
-        if (gamepadEnabled) {
-            teleopFrameCounter++;
-            // 限流 15Hz (60fps / 4)
-            if (teleopFrameCounter % 4 === 0) {
-                sendGamepadTeleopCommand(linearX, angularZ);
+    fetch(`${API_BASE}/api/v1/system/bluetooth/status`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.connected) {
+                if (badge) {
+                    badge.innerText = "已连接";
+                    badge.className = "status-badge online";
+                }
+                if (infoRow) infoRow.classList.remove("hidden");
+                if (modelSpan) modelSpan.innerText = `${data.name} [${data.mac}]`;
+                if (pulse) pulse.className = "pulse-dot active success";
+            } else {
+                if (badge) {
+                    badge.innerText = "未连接";
+                    badge.className = "status-badge offline";
+                }
+                if (infoRow) infoRow.classList.add("hidden");
+                if (pulse) pulse.className = "pulse-dot";
+                
+                const lockRow = document.getElementById("gamepad-lock-row");
+                if (lockRow) lockRow.classList.add("hidden");
             }
-        }
-    }
-
-    if (gamepadLoopActive) {
-        requestAnimationFrame(gamepadTelemetryLoop);
-    }
-}
-
-function updateJoystickPointerVisual(linear, angular) {
-    const pointer = document.getElementById("joystick-pointer");
-    if (!pointer) return;
-
-    const maxOffset = 30; // 30px
-    const offsetX = angular * maxOffset;
-    const offsetY = -linear * maxOffset;
-
-    pointer.style.transform = `translate(calc(-50% + ${offsetX.toFixed(1)}px), calc(-50% + ${offsetY.toFixed(1)}px))`;
-}
-
-function sendGamepadTeleopCommand(linearX, angularZ) {
-    // 零速限流刹车确认：如果连续下发零速，发够 3 次零速度后即行停止，节约通道带宽
-    if (linearX === 0.0 && angularZ === 0.0) {
-        if (zeroSpeedSentCount >= 3) {
-            return;
-        }
-        zeroSpeedSentCount++;
-    } else {
-        zeroSpeedSentCount = 0;
-    }
-
-    console.log(`[Teleop CMD] 速度发送: x=${linearX.toFixed(3)}, z=${angularZ.toFixed(3)}`);
-
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: "teleop",
-            linear_x: parseFloat(linearX.toFixed(3)),
-            angular_z: parseFloat(angularZ.toFixed(3))
-        }));
-    } else {
-        console.warn(`[Teleop CMD] WebSocket 未就绪。底盘状态: ${socket ? socket.readyState : 'null'}`);
-    }
+        })
+        .catch(err => console.error("静默获取主机蓝牙状态发生错误:", err));
 }
 
 // ==========================================
@@ -2705,3 +2738,92 @@ function initMapEditor() {
         });
     });
 }
+
+// ==========================================
+// 5. 系统状态与串口自动刷新逻辑 (System Status & Serial Auto Refresh)
+// ==========================================
+function startSystemStatusPolling() {
+    // 立即执行一次状态抓取
+    fetchSystemStatus();
+    // 启动 2 秒定时轮询并记录定时器 ID
+    if (statusInterval) {
+        clearInterval(statusInterval);
+    }
+    statusInterval = setInterval(fetchSystemStatus, 2000);
+}
+
+function fetchSystemStatus() {
+    fetch(`${API_BASE}/api/v1/system/status`)
+        .then(res => {
+            if (!res.ok) throw new Error("获取系统状态响应异常");
+            return res.json();
+        })
+        .then(data => {
+            // 1. 更新 CPU 占用
+            const cpuVal = document.getElementById("status-cpu-val");
+            const cpuBar = document.getElementById("status-cpu-bar");
+            if (cpuVal) cpuVal.innerText = `${data.cpu.toFixed(1)}%`;
+            if (cpuBar) cpuBar.style.width = `${data.cpu}%`;
+
+            // 2. 更新内存占用
+            const memVal = document.getElementById("status-mem-val");
+            const memBar = document.getElementById("status-mem-bar");
+            if (memVal) memVal.innerText = `${data.memory.toFixed(1)}%`;
+            if (memBar) memBar.style.width = `${data.memory}%`;
+
+            // 3. 更新内核温度
+            const tempVal = document.getElementById("status-temp-val");
+            const tempBar = document.getElementById("status-temp-bar");
+            if (tempVal) tempVal.innerText = `${data.temperature.toFixed(1)} ℃`;
+            if (tempBar) {
+                // 将温度折算成 0% 到 100% 的进度条宽度（假设正常工作温度在 0 ~ 100 ℃）
+                const tempPercent = Math.max(0, Math.min(100, data.temperature));
+                tempBar.style.width = `${tempPercent}%`;
+
+                // 配色方案：温和（<=55℃）青色，预警（55℃~75℃）橙色，高温（>75℃）红色
+                if (data.temperature <= 55) {
+                    tempBar.style.background = "var(--accent-cyan)";
+                    tempBar.style.boxShadow = "0 0 8px var(--accent-cyan-glow)";
+                } else if (data.temperature <= 75) {
+                    tempBar.style.background = "var(--accent-orange)";
+                    tempBar.style.boxShadow = "0 0 8px var(--accent-orange-glow)";
+                } else {
+                    tempBar.style.background = "var(--accent-red)";
+                    tempBar.style.boxShadow = "0 0 8px var(--accent-red-glow)";
+                }
+            }
+        })
+        .catch(err => {
+            console.error("轮询系统状态失败:", err);
+        });
+}
+
+function refreshAvailableSerialPorts() {
+    fetch(`${API_BASE}/api/v1/system/serial-ports`)
+        .then(res => {
+            if (!res.ok) throw new Error("获取可用串口列表响应异常");
+            return res.json();
+        })
+        .then(data => {
+            const ports = data.ports || [];
+            
+            // 将串口路径数组组装为 option 标签 HTML 片段
+            let optionsHTML = "";
+            ports.forEach(port => {
+                optionsHTML += `<option value="${port}"></option>`;
+            });
+
+            // 写入 micro-ROS 串口与雷达串口的 datalist 下拉推荐容器中
+            const agentDatalist = document.getElementById("agent-port-list");
+            const lidarDatalist = document.getElementById("lidar-port-list");
+            
+            if (agentDatalist) agentDatalist.innerHTML = optionsHTML;
+            if (lidarDatalist) lidarDatalist.innerHTML = optionsHTML;
+            
+            console.log(`成功刷新串口下拉列表，找到 ${ports.length} 个可用设备。`);
+        })
+        .catch(err => {
+            console.error("静默刷新串口设备失败:", err);
+        });
+}
+

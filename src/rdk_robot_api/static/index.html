@@ -11,6 +11,20 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
+    <!-- 顶部消息提示条幅 -->
+    <div id="notification-banner" class="notification-banner">
+        <span class="banner-icon"></span>
+        <span class="banner-message"></span>
+    </div>
+
+    <!-- 全局初始化与加载状态遮罩层 -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-overlay-content">
+            <div class="loading-spinner"></div>
+            <div id="loading-text" class="loading-text">系统正在初始化中，请稍候...</div>
+        </div>
+    </div>
+
     <div class="app-layout">
         <!-- 左侧导航侧边栏 -->
         <aside class="app-sidebar">
@@ -190,8 +204,35 @@
                                         <span class="pulse-dot active" id="localize-pulse"></span>
                                         <span id="lbl-auto-localize-status" class="status-label">未知状态</span>
                                     </div>
-                                    <button class="btn btn-warning btn-block" id="btn-auto-localize">🔄 一键全局重定位</button>
-                                    <button class="btn btn-danger btn-block" id="btn-nav-cancel" style="margin-top: 10px;">🚨 紧急中止当前导航</button>
+                                    <div class="btn-group-row" style="display: flex; gap: 8px;">
+                                        <button class="btn btn-warning" id="btn-auto-localize" style="flex: 1;">🔄 一键重定位</button>
+                                        <button class="btn btn-secondary" id="btn-estimate-mode" style="flex: 1;">🎯 指定估算位姿</button>
+                                    </div>
+
+                                    <!-- 手动位姿校准微调面板（默认隐藏） -->
+                                    <div id="pose-estimate-panel" class="pose-estimate-panel hidden" style="background: rgba(0,0,0,0.25); padding: 12px; border-radius: var(--border-radius-md); border: 1.5px dashed var(--accent-cyan); display: flex; flex-direction: column; gap: 8px;">
+                                        <div style="font-size: 0.72rem; color: var(--accent-cyan); text-align: center; font-weight: 500;">💡 提示：在地图上点击可提取 X/Y 坐标</div>
+                                        <div class="form-row-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0;">
+                                            <div class="form-row" style="gap: 4px;">
+                                                <label style="font-size: 0.68rem; color: var(--text-secondary); margin-bottom: 2px;">X (米)</label>
+                                                <input type="number" step="0.01" id="est-x" class="form-input" placeholder="0.00" style="padding: 4px 6px; font-size: 0.75rem; height: 28px;">
+                                            </div>
+                                            <div class="form-row" style="gap: 4px;">
+                                                <label style="font-size: 0.68rem; color: var(--text-secondary); margin-bottom: 2px;">Y (米)</label>
+                                                <input type="number" step="0.01" id="est-y" class="form-input" placeholder="0.00" style="padding: 4px 6px; font-size: 0.75rem; height: 28px;">
+                                            </div>
+                                            <div class="form-row" style="gap: 4px;">
+                                                <label style="font-size: 0.68rem; color: var(--text-secondary); margin-bottom: 2px;">Yaw (弧度)</label>
+                                                <input type="number" step="0.05" id="est-yaw" value="0.00" class="form-input" style="padding: 4px 6px; font-size: 0.75rem; height: 28px;">
+                                            </div>
+                                        </div>
+                                        <div class="btn-group-row" style="display: flex; gap: 8px; margin-top: 4px;">
+                                            <button class="btn btn-success" id="btn-pub-estimate" style="flex: 1; padding: 6px; font-size: 0.78rem; height: 28px;">确定指定</button>
+                                            <button class="btn btn-danger" id="btn-cancel-estimate" style="flex: 1; padding: 6px; font-size: 0.78rem; height: 28px;">取消</button>
+                                        </div>
+                                    </div>
+
+                                    <button class="btn btn-danger btn-block" id="btn-nav-cancel" style="margin-top: 4px;">🚨 紧急中止当前导航</button>
                                 </div>
                             </div>
                         </div>
@@ -254,6 +295,11 @@
                                                 <div class="goal-ring"></div>
                                                 <div class="goal-core"></div>
                                                 <div class="goal-label" id="goal-label"></div>
+                                            </div>
+                                            <!-- 手动估算临时位姿标记 -->
+                                            <div id="estimate-marker" class="estimate-marker hidden">
+                                                <div class="est-pulse"></div>
+                                                <div class="est-core"></div>
                                             </div>
                                         </div>
                                         <div id="map-loading" class="map-loader hidden">

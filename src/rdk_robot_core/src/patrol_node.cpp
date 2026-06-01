@@ -21,7 +21,22 @@ public:
     using NavigateToPose = nav2_msgs::action::NavigateToPose;
     using GoalHandleNav = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 
-    PatrolNode() : Node("patrol_node"), current_waypoint_index_(0), is_active_(false) {
+    PatrolNode() : Node("patrol_node"), current_waypoint_index_(0), is_active_(false), loop_mode_(true) {
+        // 先初始化定时器，保证任何时候都安全，避免由于 wait_for_action_server 超时返回导致的空指针问题
+        pause_timer_ = this->create_wall_timer(
+            3s,
+            [this]() {
+                if (this->pause_timer_) {
+                    this->pause_timer_->cancel();
+                }
+                if (this->is_active_) {
+                    this->send_next_goal();
+                }
+            });
+        if (pause_timer_) {
+            pause_timer_->cancel();
+        }
+
         // 初始化 Action Client
         action_client_ = rclcpp_action::create_client<NavigateToPose>(this, "navigate_to_pose");
 
@@ -41,6 +56,9 @@ public:
         waypoints_sub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
             "/patrol/set_waypoints", 10, std::bind(&PatrolNode::waypoints_callback, this, std::placeholders::_1));
 
+        // 创建巡逻反馈发布者
+        feedback_pub_ = this->create_publisher<std_msgs::msg::String>("/patrol/feedback", 10);
+
         RCLCPP_INFO(this->get_logger(), "Patrol Node Initialized. Waiting for command on /patrol/cmd...");
 
         // 异步等待 Action 服务器启动
@@ -49,17 +67,6 @@ public:
             return;
         }
         RCLCPP_INFO(this->get_logger(), "Nav2 Action Server Found! Ready to patrol.");
-
-        // 初始化定时器，但默认不启动
-        pause_timer_ = this->create_wall_timer(
-            3s,
-            [this]() {
-                pause_timer_->cancel();
-                if (this->is_active_) {
-                    this->send_next_goal();
-                }
-            });
-        pause_timer_->cancel();
     }
 
 private:
@@ -67,7 +74,7 @@ private:
         std::string cmd = msg->data;
         RCLCPP_INFO(this->get_logger(), "Received patrol command: '%s'", cmd.c_str());
 
-        if (cmd == "start" || cmd == "resume") {
+        if (cmd == "start" || cmd == "start_once" || cmd == "resume") {
             if (is_active_) {
                 RCLCPP_WARN(this->get_logger(), "Patrol is already running.");
                 return;
@@ -76,8 +83,13 @@ private:
                 RCLCPP_ERROR(this->get_logger(), "Cannot start patrol: waypoint list is empty.");
                 return;
             }
+            if (cmd == "start") {
+                loop_mode_ = true;
+            } else if (cmd == "start_once") {
+                loop_mode_ = false;
+            }
             is_active_ = true;
-            RCLCPP_INFO(this->get_logger(), "Starting/Resuming patrol...");
+            RCLCPP_INFO(this->get_logger(), "Starting/Resuming patrol (loop=%s)...", loop_mode_ ? "true" : "false");
             this->send_next_goal();
         } 
         else if (cmd == "pause") {
@@ -86,7 +98,9 @@ private:
                 return;
             }
             is_active_ = false;
-            pause_timer_->cancel();
+            if (pause_timer_) {
+                pause_timer_->cancel();
+            }
             if (current_goal_handle_) {
                 RCLCPP_INFO(this->get_logger(), "Canceling current navigation goal...");
                 action_client_->async_cancel_goal(current_goal_handle_);
@@ -95,7 +109,9 @@ private:
         } 
         else if (cmd == "stop") {
             is_active_ = false;
-            pause_timer_->cancel();
+            if (pause_timer_) {
+                pause_timer_->cancel();
+            }
             if (current_goal_handle_) {
                 RCLCPP_INFO(this->get_logger(), "Canceling current navigation goal...");
                 action_client_->async_cancel_goal(current_goal_handle_);
@@ -115,7 +131,9 @@ private:
         if (current_goal_handle_) {
             action_client_->async_cancel_goal(current_goal_handle_);
         }
-        pause_timer_->cancel();
+        if (pause_timer_) {
+            pause_timer_->cancel();
+        }
 
         waypoints_.clear();
         for (const auto& pose : msg->poses) {
@@ -150,8 +168,20 @@ private:
         }
 
         if (current_waypoint_index_ >= waypoints_.size()) {
-            RCLCPP_INFO(this->get_logger(), "--- One Full Loop Completed! Starting over... ---");
-            current_waypoint_index_ = 0;
+            if (loop_mode_) {
+                RCLCPP_INFO(this->get_logger(), "--- One Full Loop Completed! Starting over... ---");
+                current_waypoint_index_ = 0;
+            } else {
+                RCLCPP_INFO(this->get_logger(), "--- One-time Patrol Completed! Stopping patrol. ---");
+                {
+                    std_msgs::msg::String fb_msg;
+                    fb_msg.data = "completed";
+                    feedback_pub_->publish(fb_msg);
+                }
+                is_active_ = false;
+                current_waypoint_index_ = 0;
+                return;
+            }
         }
 
         const auto& wp = waypoints_[current_waypoint_index_];
@@ -190,6 +220,11 @@ private:
         switch (result.code) {
             case rclcpp_action::ResultCode::SUCCEEDED:
                 RCLCPP_INFO(this->get_logger(), "<<< Successfully reached Waypoint %zu!", current_waypoint_index_ + 1);
+                {
+                    std_msgs::msg::String fb_msg;
+                    fb_msg.data = "reached_" + std::to_string(current_waypoint_index_ + 1);
+                    feedback_pub_->publish(fb_msg);
+                }
                 break;
             case rclcpp_action::ResultCode::ABORTED:
                 RCLCPP_ERROR(this->get_logger(), "Goal was aborted.");
@@ -208,7 +243,9 @@ private:
         // 只有在巡逻仍然激活的情况下，才重置定时器去往下一个航点
         if (is_active_) {
             RCLCPP_INFO(this->get_logger(), "Pausing for 3 seconds before next waypoint...");
-            pause_timer_->reset();
+            if (pause_timer_) {
+                pause_timer_->reset();
+            }
         }
     }
 
@@ -218,11 +255,13 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr waypoints_sub_;
     rclcpp::TimerBase::SharedPtr pause_timer_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr feedback_pub_;
 
     // 内部状态
     std::vector<Waypoint> waypoints_;
     size_t current_waypoint_index_;
     bool is_active_;
+    bool loop_mode_;
 };
 
 int main(int argc, char** argv) {

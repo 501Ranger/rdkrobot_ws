@@ -68,11 +68,36 @@ def trigger_patrol_by_schedule():
     """定时任务触发的回调函数"""
     if rn.ros_node:
         rn.ros_node.get_logger().info("Scheduled event triggered! Starting patrol...")
-        rn.ros_node.publish_patrol_cmd("start")
+        rn.ros_node.publish_patrol_cmd("start_once")
+        
+        # 激活前端 Web 顶部提示条幅通知
+        from . import manager as m
+        m.scheduled_patrol_triggered = True
 
 def main():
     # 注册 SIGTERM 信号处理器，确保收到 SIGTERM 时能运行 finally 块清理进程组
     signal.signal(signal.SIGTERM, sigterm_handler)
+    
+    # 0. 启动前强行清理可能存在的残留进程，保证环境绝对干净
+    os.system("pkill -9 -f gazebo || true")
+    os.system("pkill -9 -f gzserver || true")
+    os.system("pkill -9 -f gzclient || true")
+    os.system("pkill -9 -f nav2_ || true")
+    os.system("pkill -9 -f amcl || true")
+    os.system("pkill -9 -f map_server || true")
+    os.system("pkill -9 -f planner_server || true")
+    os.system("pkill -9 -f controller_server || true")
+    os.system("pkill -9 -f behavior_server || true")
+    os.system("pkill -9 -f bt_navigator || true")
+    os.system("pkill -9 -f waypoint_follower || true")
+    os.system("pkill -9 -f velocity_smoother || true")
+    os.system("pkill -9 -f smoother_server || true")
+    os.system("pkill -9 -f lifecycle_manager || true")
+    os.system("pkill -9 -f patrol_node || true")
+    os.system("pkill -9 -f robot_state_publisher || true")
+    os.system("pkill -9 -f spawn_entity.py || true")
+    os.system("pkill -9 -f auto_localize || true")
+    os.system("docker kill microros_agent >/dev/null 2>&1 || true")
     
     # 1. 启动 ROS 2 守护子线程
     ros_thread = threading.Thread(target=ros2_thread_entry, daemon=True)

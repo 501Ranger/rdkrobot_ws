@@ -14,8 +14,8 @@ def post_patrol_cmd(payload: CommandPayload):
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
     
     cmd_lower = payload.cmd.lower()
-    if cmd_lower not in ["start", "pause", "stop", "resume"]:
-        raise HTTPException(status_code=400, detail="Invalid command. Allowed: start, pause, stop, resume")
+    if cmd_lower not in ["start", "start_once", "pause", "stop", "resume"]:
+        raise HTTPException(status_code=400, detail="Invalid command. Allowed: start, start_once, pause, stop, resume")
     
     rn.ros_node.publish_patrol_cmd(cmd_lower)
     return {"status": "success", "command_sent": cmd_lower}

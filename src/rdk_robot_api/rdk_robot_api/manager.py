@@ -38,6 +38,13 @@ agent_process = None
 base_process = None
 lidar_process = None
 
+# 定时巡逻触发事件广播标志
+scheduled_patrol_triggered = False
+
+# 巡逻过程中到达具体航点及完成巡逻的事件状态
+waypoint_reached_index = 0
+patrol_completed_triggered = False
+
 def terminate_process_group(process):
     """安全中止进程及其全部子进程组"""
     if not process or process.poll() is not None:
@@ -77,6 +84,18 @@ async def broadcast_status_loop():
                 base_running = (m.base_process is not None) and (m.base_process.poll() is None)
                 lidar_running = (m.lidar_process is not None) and (m.lidar_process.poll() is None)
                 
+                triggered = m.scheduled_patrol_triggered
+                if triggered:
+                    m.scheduled_patrol_triggered = False
+
+                reached_idx = m.waypoint_reached_index
+                if reached_idx > 0:
+                    m.waypoint_reached_index = 0
+
+                completed_triggered = m.patrol_completed_triggered
+                if completed_triggered:
+                    m.patrol_completed_triggered = False
+
                 status_data = {
                     "battery_percentage": round(rn.ros_node.battery_pct, 1),
                     "pose": rn.ros_node.robot_pose,
@@ -89,7 +108,10 @@ async def broadcast_status_loop():
                     "sim_running": sim_running,
                     "base_running": base_running,
                     "lidar_running": lidar_running,
-                    "nav2_plan": rn.ros_node.nav2_path
+                    "nav2_plan": rn.ros_node.nav2_path,
+                    "scheduled_patrol_triggered": triggered,
+                    "waypoint_reached": reached_idx,
+                    "patrol_completed": completed_triggered
                 }
                 await manager.broadcast(status_data)
             except Exception:

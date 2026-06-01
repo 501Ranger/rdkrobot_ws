@@ -8,6 +8,57 @@ let pollInterval = null;
 let statusInterval = null;
 let currentPose = null;
 let currentGoal = null; // 当前导航目标点 {x, y}
+let isEstimatingPose = false;
+let estimatePoseVal = { x: 0.0, y: 0.0, yaw: 0.0 };
+let lastNavStatus = "IDLE";
+let bannerTimeout = null;
+
+// 全局加载指示器控制
+function showLoading(text = "系统正在工作，请稍候...") {
+    const overlay = document.getElementById("loading-overlay");
+    const label = document.getElementById("loading-text");
+    if (overlay && label) {
+        label.innerText = text;
+        overlay.style.display = "flex";
+    }
+}
+
+function hideLoading() {
+    const overlay = document.getElementById("loading-overlay");
+    if (overlay) {
+        overlay.style.display = "none";
+    }
+}
+
+// 全局通知条幅控制器
+function showNotificationBanner(message, type = "patrol", duration = 5000) {
+    const banner = document.getElementById("notification-banner");
+    if (!banner) return;
+    
+    const iconEl = banner.querySelector(".banner-icon");
+    const messageEl = banner.querySelector(".banner-message");
+    
+    if (type === "patrol") {
+        iconEl.innerText = "⏱️";
+        banner.className = "notification-banner patrol show";
+    } else if (type === "success") {
+        iconEl.innerText = "🏁";
+        banner.className = "notification-banner success show";
+    } else {
+        iconEl.innerText = "🔔";
+        banner.className = "notification-banner show";
+    }
+    
+    messageEl.innerText = message;
+    
+    if (bannerTimeout) {
+        clearTimeout(bannerTimeout);
+    }
+    
+    bannerTimeout = setTimeout(() => {
+        banner.classList.remove("show");
+    }, duration);
+}
 
 // 地图缩放与平移交互状态
 let zoomScale = 1.0;
@@ -141,6 +192,21 @@ function pollStatusHttp() {
 function updateTelemetry(data) {
     updateConnectionStatus(true);
     
+    // 定时巡逻触发提示
+    if (data.scheduled_patrol_triggered) {
+        showNotificationBanner("定时巡逻计划已启动，正在执行单次顺序巡逻...", "patrol");
+    }
+    
+    // 巡逻航点到达提示
+    if (data.waypoint_reached && data.waypoint_reached > 0) {
+        showNotificationBanner(`机器人已顺利到达第 ${data.waypoint_reached} 个巡逻点！`, "success");
+    }
+    
+    // 巡逻全部完成提示
+    if (data.patrol_completed) {
+        showNotificationBanner("🏆 整条航线巡逻已全部顺利完成！", "success");
+    }
+    
     // 更新位姿
     if (data.pose) {
         document.getElementById("pose-x").innerText = `${data.pose.x.toFixed(3)} m`;
@@ -171,6 +237,9 @@ function updateTelemetry(data) {
     } else if (navStatus === "REACHED") {
         navStatusEl.style.color = "var(--accent-green)";
         hideGoalMarker(); // 到达目标后清除标记
+        if (lastNavStatus === "NAVIGATING") {
+            showNotificationBanner("机器人已顺利到达目标点！", "success");
+        }
     } else if (navStatus === "FAILED") {
         navStatusEl.style.color = "var(--accent-red)";
         hideGoalMarker(); // 导航失败后清除标记
@@ -180,6 +249,7 @@ function updateTelemetry(data) {
             hideGoalMarker(); // IDLE / 取消后清除标记
         }
     }
+    lastNavStatus = navStatus;
 
     // 更新电量
     updateBatteryDisplay(data.battery_percentage);
@@ -449,7 +519,7 @@ function startWaypointPatrol() {
         return fetch(`${API_BASE}/api/v1/patrol/cmd`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cmd: "start" })
+            body: JSON.stringify({ cmd: "start_once" })
         });
     })
     .then(res => {
@@ -629,6 +699,8 @@ function loadSelectedMap() {
     innerContainer.classList.add("hidden");
     loader.classList.remove("hidden");
 
+    showLoading(`正在载入地图 '${mapName}' 并启动定位服务...`);
+
     // 调用后端 API 加载地图至导航系统
     fetch(`${API_BASE}/api/v1/maps/${mapName}/load`, { method: "POST" })
         .then(res => {
@@ -643,6 +715,7 @@ function loadSelectedMap() {
             img.onload = () => {
                 loader.classList.add("hidden");
                 innerContainer.classList.remove("hidden");
+                hideLoading();
                 // 重置缩放与平移状态
                 zoomScale = 1.0;
                 panX = 0;
@@ -654,11 +727,16 @@ function loadSelectedMap() {
                 drawTrajectory();
                 drawPlannedPath();
             };
+            img.onerror = () => {
+                hideLoading();
+                showToast("获取地图底图失败", "error");
+            };
             
             // 拉取这个地图的 POI 列表
             refreshPoiList(mapName);
         })
         .catch(err => {
+            hideLoading();
             showToast(err.message, "error");
             loader.classList.add("hidden");
             innerContainer.classList.add("hidden");
@@ -699,6 +777,16 @@ function handleMapClick(e) {
     // 像素的 Y 轴是从上往下增长，而 ROS 物理 Y 轴是从下往上增长
     const worldX = originX + (pixelX * resolution);
     const worldY = originY + ((naturalHeight - pixelY) * resolution);
+
+    if (isEstimatingPose) {
+        document.getElementById("est-x").value = worldX.toFixed(3);
+        document.getElementById("est-y").value = worldY.toFixed(3);
+        estimatePoseVal.x = worldX;
+        estimatePoseVal.y = worldY;
+        showEstimateMarker(worldX, worldY);
+        showToast(`已标定估算位置：X=${worldX.toFixed(3)}, Y=${worldY.toFixed(3)}`, "info");
+        return;
+    }
 
     // 检查当前点击模式
     const clickMode = document.querySelector('input[name="map-click-mode"]:checked')?.value || "nav";
@@ -932,16 +1020,21 @@ function setupEventListeners() {
     if (btnInitHardware) {
         btnInitHardware.addEventListener("click", () => {
             showToast("正在一键初始化实机硬件，启动底盘与雷达...", "info");
+            showLoading("正在一键初始化实机硬件，启动底盘与雷达...");
             fetch(`${API_BASE}/api/v1/robot/hardware/init`, { method: "POST" })
                 .then(res => res.json())
                 .then(data => {
+                    hideLoading();
                     if (data.status === "success") {
                         showToast("实机硬件初始化成功，已拉起底层节点！", "success");
                     } else {
                         showToast("初始化失败：" + data.details.join(", "), "error");
                     }
                 })
-                .catch(() => showToast("下发硬件初始化命令失败", "error"));
+                .catch(() => {
+                    hideLoading();
+                    showToast("下发硬件初始化命令失败", "error");
+                });
         });
     }
 
@@ -1023,6 +1116,80 @@ function setupEventListeners() {
     // H. 重定位触发
     document.getElementById("btn-auto-localize").addEventListener("click", triggerAutoLocalize);
 
+    // H.2 手动指定估算位姿交互
+    const btnEstimateMode = document.getElementById("btn-estimate-mode");
+    const panelEstimate = document.getElementById("pose-estimate-panel");
+    const btnPubEstimate = document.getElementById("btn-pub-estimate");
+    const btnCancelEstimate = document.getElementById("btn-cancel-estimate");
+
+    if (btnEstimateMode && panelEstimate) {
+        btnEstimateMode.addEventListener("click", () => {
+            if (!currentMap) {
+                showToast("请先选择并加载地图", "error");
+                return;
+            }
+            // 展开面板
+            panelEstimate.classList.remove("hidden");
+            isEstimatingPose = true;
+            
+            // 初始化值（默认使用小车当前位姿，方便微调）
+            const defaultX = currentPose ? currentPose.x : 0.0;
+            const defaultY = currentPose ? currentPose.y : 0.0;
+            const defaultYaw = currentPose ? currentPose.yaw : 0.0;
+            
+            document.getElementById("est-x").value = defaultX.toFixed(3);
+            document.getElementById("est-y").value = defaultY.toFixed(3);
+            document.getElementById("est-yaw").value = defaultYaw.toFixed(3);
+            
+            estimatePoseVal = { x: defaultX, y: defaultY, yaw: defaultYaw };
+            showEstimateMarker(defaultX, defaultY);
+            
+            showToast("🎯 位姿校准模式已开启，请直接在地图上点击小车当前所在位置", "info");
+        });
+    }
+
+    if (btnCancelEstimate && panelEstimate) {
+        btnCancelEstimate.addEventListener("click", () => {
+            panelEstimate.classList.add("hidden");
+            isEstimatingPose = false;
+            hideEstimateMarker();
+            showToast("已退出位姿校准模式", "info");
+        });
+    }
+
+    if (btnPubEstimate && panelEstimate) {
+        btnPubEstimate.addEventListener("click", () => {
+            const x = parseFloat(document.getElementById("est-x").value);
+            const y = parseFloat(document.getElementById("est-y").value);
+            const yaw = parseFloat(document.getElementById("est-yaw").value);
+            
+            if (isNaN(x) || isNaN(y) || isNaN(yaw)) {
+                showToast("位姿数据不能为空", "error");
+                return;
+            }
+            
+            showToast("正在下发估算初始位姿...", "info");
+            fetch(`${API_BASE}/api/v1/nav/initialpose`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ x, y, yaw })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error("下发初始位姿失败");
+                return res.json();
+            })
+            .then(data => {
+                showToast("🎯 初始位姿覆盖下发成功！AMCL 已重置定位！", "success");
+                panelEstimate.classList.add("hidden");
+                isEstimatingPose = false;
+                hideEstimateMarker();
+            })
+            .catch(err => {
+                showToast(err.message, "error");
+            });
+        });
+    }
+
     // I. 地图缩放拖动交互
     setupMapInteraction();
 
@@ -1032,19 +1199,33 @@ function setupEventListeners() {
     if (btnStartSim) {
         btnStartSim.addEventListener("click", () => {
             showToast("正在启动 Gazebo 仿真...", "info");
+            showLoading("正在启动 Gazebo 仿真与伴随节点，请稍候...");
             fetch(`${API_BASE}/api/v1/sim/start`, { method: "POST" })
                 .then(res => res.json())
-                .then(data => showToast("Gazebo 仿真启动成功", "success"))
-                .catch(() => showToast("启动 Gazebo 失败", "error"));
+                .then(data => {
+                    hideLoading();
+                    showToast("Gazebo 仿真启动成功", "success");
+                })
+                .catch(() => {
+                    hideLoading();
+                    showToast("启动 Gazebo 失败", "error");
+                });
         });
     }
     if (btnStopSim) {
         btnStopSim.addEventListener("click", () => {
             showToast("正在关闭 Gazebo 仿真...", "info");
+            showLoading("正在关闭 Gazebo 仿真环境...");
             fetch(`${API_BASE}/api/v1/sim/stop`, { method: "POST" })
                 .then(res => res.json())
-                .then(data => showToast("Gazebo 仿真已成功关闭", "success"))
-                .catch(() => showToast("关闭 Gazebo 失败", "error"));
+                .then(data => {
+                    hideLoading();
+                    showToast("Gazebo 仿真已成功关闭", "success");
+                })
+                .catch(() => {
+                    hideLoading();
+                    showToast("关闭 Gazebo 失败", "error");
+                });
         });
     }
 
@@ -1265,6 +1446,43 @@ function hideGoalMarker() {
     if (marker) marker.classList.add("hidden");
     currentGoal = null;
 }
+
+function showEstimateMarker(rosX, rosY) {
+    if (!currentMap) return;
+    const img = document.getElementById("map-image");
+    const marker = document.getElementById("estimate-marker");
+    if (!img || !marker) return;
+
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    if (!naturalWidth || !naturalHeight) return;
+
+    const resolution = currentMap.resolution;
+    const originX = currentMap.origin[0];
+    const originY = currentMap.origin[1];
+
+    const pixelX = (rosX - originX) / resolution;
+    const pixelY = naturalHeight - ((rosY - originY) / resolution);
+    const pctX = (pixelX / naturalWidth) * 100;
+    const pctY = (pixelY / naturalHeight) * 100;
+
+    if (pctX >= 0 && pctX <= 100 && pctY >= 0 && pctY <= 100) {
+        marker.style.left = `${pctX}%`;
+        marker.style.top = `${pctY}%`;
+        
+        // 计算逆缩放比例，保持目标点标识视觉大小恒定
+        const invScale = 1.0 / zoomScale;
+        marker.style.transform = `translate(-50%, -50%) scale(${invScale})`;
+        
+        marker.classList.remove("hidden");
+    }
+}
+
+function hideEstimateMarker() {
+    const marker = document.getElementById("estimate-marker");
+    if (marker) marker.classList.add("hidden");
+}
+
 
 function drawTrajectory() {
     const polyline = document.getElementById("trajectory-path");
@@ -1581,6 +1799,9 @@ function updateMapTransform() {
     if (currentGoal) {
         showGoalMarker(currentGoal.x, currentGoal.y);
     }
+    if (isEstimatingPose) {
+        showEstimateMarker(estimatePoseVal.x, estimatePoseVal.y);
+    }
     drawPlannedPath();
 }
 
@@ -1815,9 +2036,9 @@ function gamepadTelemetryLoop() {
         let linear = Math.abs(rawLinear) < deadzone ? 0.0 : rawLinear;
         let angular = Math.abs(rawAngular) < deadzone ? 0.0 : rawAngular;
 
-        // 物理上限约束映射：线速度最大 0.45 m/s，角速度最大 1.20 rad/s
+        // 物理上限约束映射：线速度最大 0.45 m/s，角速度最大 2.50 rad/s
         const maxLinear = 0.45;
-        const maxAngular = 1.20;
+        const maxAngular = 2.50;
         
         let linearX = linear * maxLinear;
         let angularZ = angular * maxAngular;
@@ -2086,7 +2307,7 @@ function webTeleopLoop() {
         const rawAngular = -joystickX / joystickMaxRadius;
 
         linearX = rawLinear * 0.45;
-        angularZ = rawAngular * 1.20;
+        angularZ = rawAngular * 2.50;
     } else {
         // 2. 否则执行键盘按键遥控值
         let keyLinear = 0.0;
@@ -2098,12 +2319,12 @@ function webTeleopLoop() {
         if (pressedKeys.d || pressedKeys.ArrowRight) keyAngular -= 1.0;
 
         linearX = keyLinear * 0.45;
-        angularZ = keyAngular * 1.20;
+        angularZ = keyAngular * 2.50;
     }
 
     // 限幅裁剪约束
     linearX = Math.min(Math.max(linearX, -0.45), 0.45);
-    angularZ = Math.min(Math.max(angularZ, -1.20), 1.20);
+    angularZ = Math.min(Math.max(angularZ, -2.50), 2.50);
 
     webTeleopFrameCounter++;
     // 限流 15Hz (每 4 帧下发一次)

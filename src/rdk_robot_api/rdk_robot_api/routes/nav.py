@@ -9,7 +9,7 @@ from std_srvs.srv import Trigger
 
 from .. import ros_node as rn
 from .. import config
-from ..models import NavGoPayload, TaskPayload
+from ..models import NavGoPayload, TaskPayload, WaypointPayload
 
 router = APIRouter(prefix="/api/v1/nav", tags=["Navigation"])
 
@@ -26,9 +26,9 @@ async def compute_path_segment(ros_node, start_pose, goal_pose) -> list:
         return None
 
     goal_msg = ComputePathToPose.Goal()
-    goal_msg.pose.header.frame_id = 'map'
-    goal_msg.pose.header.stamp = ros_node.get_clock().now().to_msg()
-    goal_msg.pose.pose = goal_pose
+    goal_msg.goal.header.frame_id = 'map'
+    goal_msg.goal.header.stamp = ros_node.get_clock().now().to_msg()
+    goal_msg.goal.pose = goal_pose
 
     if start_pose is not None:
         goal_msg.use_start = True
@@ -153,6 +153,15 @@ def trigger_auto_localize():
     req = Trigger.Request()
     rn.ros_node.localize_cli.call_async(req)
     return {"status": "success", "message": "Trigger request sent to auto_localize node."}
+
+@router.post("/initialpose")
+def set_initial_pose(payload: WaypointPayload):
+    """手动发布初始位姿给 AMCL 定位系统 (类似于 2D Pose Estimate)"""
+    if not rn.ros_node:
+        raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
+    
+    rn.ros_node.publish_initial_pose(x=payload.x, y=payload.y, yaw=payload.yaw)
+    return {"status": "success", "message": f"Initial pose published: x={payload.x:.3f}, y={payload.y:.3f}, yaw={payload.yaw:.2f}"}
 
 @router.get("/auto-localize/status")
 def get_auto_localize_status():

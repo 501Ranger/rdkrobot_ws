@@ -74,6 +74,9 @@ class RobotApiNode(Node):
         self.nav2_path_sub = self.create_subscription(
             Path, "/plan", self.nav2_path_callback, 10
         )
+        self.patrol_feedback_sub = self.create_subscription(
+            String, "/patrol/feedback", self.patrol_feedback_callback, 10
+        )
 
         # 服务客户端
         self.localize_cli = self.create_client(Trigger, "/trigger_auto_localize")
@@ -140,6 +143,19 @@ class RobotApiNode(Node):
 
     def localize_status_callback(self, msg: Bool):
         self.is_localizing = msg.data
+
+    def patrol_feedback_callback(self, msg: String):
+        data_str = msg.data
+        self.get_logger().info(f"Received patrol feedback: '{data_str}'")
+        from . import manager as m
+        if data_str.startswith("reached_"):
+            try:
+                idx = int(data_str.split("_")[1])
+                m.waypoint_reached_index = idx
+            except Exception as e:
+                self.get_logger().error(f"Failed to parse waypoint index from feedback '{data_str}': {e}")
+        elif data_str == "completed":
+            m.patrol_completed_triggered = True
 
     def nav2_path_callback(self, msg: Path):
         poses = msg.poses

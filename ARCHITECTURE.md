@@ -19,6 +19,7 @@ rdkrobot_ws/
 │   ├── rdk_robot_api/         # Python API 服务与 HMI 静态网页包
 │   │   ├── config/            # 统一参数配置文件 robot_params.yaml
 │   │   ├── static/            # 网页 HMI 静态资源层 (HTML, CSS, JS)
+│   │   ├── requirements.txt   # Python Web 服务依赖项清单
 │   │   └── rdk_robot_api/     # API 服务逻辑子包 (模块化重构)
 │   │       ├── main.py        # 服务主入口 (路由注册与子进程清理)
 │   │       ├── scheduler.py   # 定时巡逻持久化调度器
@@ -35,7 +36,7 @@ rdkrobot_ws/
 │   │           ├── nav.py     # 坐标/语义导航与多点路径预览 API
 │   │           ├── slam.py    # SLAM 建图控制及联动 API
 │   │           ├── explore.py # 前沿边界自主探索建图 API
-│   │           └── maps.py    # 地图列表、预览及 POI 语义点管理 API
+│   │           └── maps.py    # 地图列表、预览、地图修剪与设定围墙及 POI 语义点管理 API
 │   │
 │   ├── rdk_robot_core/        # 核心 C++ 节点（TF 广播与巡逻控制）
 │   ├── rdk_robot_apps/        # 高层 Python 应用（自动全局定位脚本等）

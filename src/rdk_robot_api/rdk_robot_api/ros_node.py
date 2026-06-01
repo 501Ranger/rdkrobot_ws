@@ -8,7 +8,7 @@ from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PoseArray, Pose, Twist, PoseWithCovarianceStamped
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import BatteryState
-from nav_msgs.msg import Odometry, Path
+from nav_msgs.msg import Odometry, Path, OccupancyGrid
 from nav2_msgs.srv import LoadMap, ManageLifecycleNodes
 from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from lifecycle_msgs.srv import ChangeState
@@ -91,6 +91,8 @@ class RobotApiNode(Node):
         self.robot_pose = {"x": 0.0, "y": 0.0, "yaw": 0.0}
         self.is_localizing = False
         self.nav2_path = []
+        self.map_sub = None
+        self.realtime_map_data = None
         
         # 导航相关变量
         self.current_nav_goal_handle = None
@@ -156,6 +158,51 @@ class RobotApiNode(Node):
                 self.get_logger().error(f"Failed to parse waypoint index from feedback '{data_str}': {e}")
         elif data_str == "completed":
             m.patrol_completed_triggered = True
+        elif data_str.startswith("interrupted_"):
+            try:
+                reason = data_str.split("_")[1]
+                m.patrol_interrupted_reason = reason
+            except Exception as e:
+                self.get_logger().error(f"Failed to parse interrupt reason from feedback '{data_str}': {e}")
+
+    def map_callback(self, msg: OccupancyGrid):
+        try:
+            import numpy as np
+            from PIL import Image
+            import io
+            import base64
+
+            width = msg.info.width
+            height = msg.info.height
+            if width <= 0 or height <= 0:
+                return
+
+            data = np.array(msg.data, dtype=np.int8).reshape((height, width))
+            rgba = np.zeros((height, width, 4), dtype=np.uint8)
+            
+            # 空闲 (0) -> 白色
+            rgba[data == 0] = [255, 255, 255, 255]
+            # 障碍 (100) -> 墨色 (18, 22, 37)
+            rgba[data == 100] = [18, 22, 37, 255]
+            # 未知 (-1) 保持透明
+
+            # 翻转地图匹配左上角原点
+            rgba = np.flipud(rgba)
+
+            img = Image.fromarray(rgba, 'RGBA')
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+            self.realtime_map_data = {
+                "width": width,
+                "height": height,
+                "resolution": msg.info.resolution,
+                "origin": [msg.info.origin.position.x, msg.info.origin.position.y],
+                "image_base64": img_str
+            }
+        except Exception as e:
+            self.get_logger().error(f"Failed to process live SLAM map: {e}")
 
     def nav2_path_callback(self, msg: Path):
         poses = msg.poses

@@ -12,6 +12,7 @@ let isEstimatingPose = false;
 let estimatePoseVal = { x: 0.0, y: 0.0, yaw: 0.0 };
 let lastNavStatus = "IDLE";
 let bannerTimeout = null;
+let isRealtimeMapActive = false;
 
 // 全局加载指示器控制
 function showLoading(text = "系统正在工作，请稍候...") {
@@ -44,6 +45,9 @@ function showNotificationBanner(message, type = "patrol", duration = 5000) {
     } else if (type === "success") {
         iconEl.innerText = "🏁";
         banner.className = "notification-banner success show";
+    } else if (type === "error") {
+        iconEl.innerText = "⚠️";
+        banner.className = "notification-banner error show";
     } else {
         iconEl.innerText = "🔔";
         banner.className = "notification-banner show";
@@ -207,6 +211,52 @@ function updateTelemetry(data) {
         showNotificationBanner("🏆 整条航线巡逻已全部顺利完成！", "success");
     }
     
+    // 巡逻异常中断提示
+    if (data.patrol_interrupted) {
+        if (data.patrol_interrupted === "aborted") {
+            showNotificationBanner("⚠️ 巡逻被迫中止：导航目标被拒绝或发生障碍失败！", "error");
+        } else if (data.patrol_interrupted === "canceled") {
+            showNotificationBanner("⚠️ 巡逻已取消：被新的单点导航目标抢占。", "patrol");
+        } else {
+            showNotificationBanner("⚠️ 巡逻任务异常终止！", "error");
+        }
+    }
+    
+    // 实时 SLAM 建图动态图像渲染
+    if (data.realtime_map) {
+        const realtime = data.realtime_map;
+        
+        // 动态绑定 currentMap 元数据以保持实时坐标映射工作正常
+        currentMap = {
+            name: "realtime_slam_map",
+            resolution: realtime.resolution,
+            origin: realtime.origin,
+            width: realtime.width,
+            height: realtime.height
+        };
+        
+        // 动态更新底图数据源
+        const img = document.getElementById("map-image");
+        if (img) {
+            img.src = `data:image/png;base64,${realtime.image_base64}`;
+        }
+        
+        // 显式显示地图容器并隐藏空地图占位
+        const placeholder = document.getElementById("map-placeholder");
+        const innerContainer = document.getElementById("map-inner-container");
+        if (placeholder) placeholder.classList.add("hidden");
+        if (innerContainer) innerContainer.classList.remove("hidden");
+        
+        // 首次激活时，复位缩放与平移以便完整居中追踪，后续更新时只刷新底图以维护用户手势交互位置
+        if (!isRealtimeMapActive) {
+            isRealtimeMapActive = true;
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
+            updateMapTransform();
+        }
+    }
+    
     // 更新位姿
     if (data.pose) {
         document.getElementById("pose-x").innerText = `${data.pose.x.toFixed(3)} m`;
@@ -236,17 +286,21 @@ function updateTelemetry(data) {
         navStatusEl.style.color = "var(--accent-cyan)";
     } else if (navStatus === "REACHED") {
         navStatusEl.style.color = "var(--accent-green)";
-        hideGoalMarker(); // 到达目标后清除标记
         if (lastNavStatus === "NAVIGATING") {
+            hideGoalMarker(); // 只有从导航状态到达后才清除标记
             showNotificationBanner("机器人已顺利到达目标点！", "success");
         }
     } else if (navStatus === "FAILED") {
         navStatusEl.style.color = "var(--accent-red)";
-        hideGoalMarker(); // 导航失败后清除标记
+        if (lastNavStatus === "NAVIGATING") {
+            hideGoalMarker(); // 只有从导航状态失败后才清除标记
+        }
     } else {
         navStatusEl.style.color = "var(--accent-orange)";
         if (navStatus === "IDLE" || navStatus === "CANCELLED") {
-            hideGoalMarker(); // IDLE / 取消后清除标记
+            if (lastNavStatus === "NAVIGATING") {
+                hideGoalMarker(); // 只有从导航状态取消后才清除标记
+            }
         }
     }
     lastNavStatus = navStatus;
@@ -688,6 +742,7 @@ function loadSelectedMap() {
     }
 
     currentMap = mapList.find(m => m.name === mapName);
+    isRealtimeMapActive = false; // 切换为静态地图，解除实时地图标志
     
     // 显示加载态
     const placeholder = document.getElementById("map-placeholder");
@@ -797,6 +852,7 @@ function handleMapClick(e) {
         document.getElementById("poi-x").value = worldX.toFixed(3);
         document.getElementById("poi-y").value = worldY.toFixed(3);
         document.getElementById("poi-yaw").value = "0.000"; // 默认朝向设为 0.000
+        showGoalMarker(worldX, worldY); // 选点后立即展示标记点！
         showToast(`提取坐标成功: X=${worldX.toFixed(3)}, Y=${worldY.toFixed(3)}`, "success");
     }
 }
@@ -1301,6 +1357,9 @@ function setupEventListeners() {
     if (themeBtn) {
         themeBtn.addEventListener("click", toggleTheme);
     }
+
+    // P. 初始化地图编辑器
+    initMapEditor();
 }
 
 // 弹窗提示函数 (Toast Overlay)
@@ -2335,4 +2394,314 @@ function webTeleopLoop() {
     if (webTeleopLoopActive) {
         requestAnimationFrame(webTeleopLoop);
     }
+}
+
+// ==========================================
+// 地图修改修剪与设定围墙编辑器逻辑 (Map Editor)
+// ==========================================
+function initMapEditor() {
+    const btnEditMap = document.getElementById("btn-edit-current-map");
+    const modal = document.getElementById("map-editor-modal");
+    const btnClose = document.getElementById("btn-close-map-editor");
+    const btnCancel = document.getElementById("btn-editor-cancel");
+    const btnSave = document.getElementById("btn-editor-save");
+    const btnUndo = document.getElementById("btn-editor-undo");
+    const btnClear = document.getElementById("btn-editor-clear");
+    const toolEraser = document.getElementById("tool-eraser");
+    const toolBrush = document.getElementById("tool-brush");
+    const brushSizeInput = document.getElementById("editor-brush-size");
+    const brushSizeVal = document.getElementById("brush-size-val");
+    const canvas = document.getElementById("map-editor-canvas");
+
+    if (!btnEditMap || !modal || !canvas) {
+        console.warn("Map Editor elements not found in DOM");
+        return;
+    }
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let drawing = false;
+    let brushMode = "eraser"; // "eraser" 或 "brush"
+    let brushSize = 6;
+    let editorUndoStack = [];
+    const maxUndoSteps = 15;
+    let lastX = 0;
+    let lastY = 0;
+
+    // 设置 canvas 样式背景色 (未知区域显示色)
+    canvas.style.backgroundColor = '#cdcdcd';
+
+    // 辅助函数：保存当前状态到 Undo 栈
+    function saveState() {
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        if (editorUndoStack.length >= maxUndoSteps) {
+            editorUndoStack.shift();
+        }
+        editorUndoStack.push(imgData);
+    }
+
+    // 辅助函数：计算 Canvas 上的相对坐标 (防拉伸)
+    function getCanvasCoords(e) {
+        const rect = canvas.getBoundingClientRect();
+        let clientX, clientY;
+        
+        // 区分触控事件和鼠标事件
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        
+        const x = (clientX - rect.left) * (canvas.width / rect.width);
+        const y = (clientY - rect.top) * (canvas.height / rect.height);
+        return { x, y };
+    }
+
+    // 绘制线段的逻辑
+    function drawSegment(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        
+        if (brushMode === "eraser") {
+            ctx.strokeStyle = "rgb(255, 255, 255)"; // 橡皮擦画白色
+        } else {
+            ctx.strokeStyle = "rgb(18, 22, 37)"; // 画笔画黑色
+        }
+        
+        ctx.stroke();
+    }
+
+    // A. 开启编辑器入口
+    btnEditMap.addEventListener("click", () => {
+        if (!currentMap || !currentMap.name) {
+            showToast("请先在左侧选择并加载一张地图！", "error");
+            return;
+        }
+
+        showLoading("正在拉取原图加载编辑器...");
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = `${API_BASE}/api/v1/maps/${currentMap.name}/image?t=${Date.now()}`;
+        
+        img.onload = () => {
+            hideLoading();
+            modal.classList.remove("hidden");
+            
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+
+            // 自适应等比例放大 CSS 显示尺寸逻辑 (解决小地图展示过小不便操作的问题)
+            const maxDisplayWidth = Math.min(window.innerWidth * 0.9, 950);
+            const maxDisplayHeight = 500; // 配合 .map-editor-workspace 高度 (550px - padding)
+            let scale = Math.min(maxDisplayWidth / img.naturalWidth, maxDisplayHeight / img.naturalHeight);
+            scale = Math.min(scale, 10.0); // 限制最大放大至 10 倍
+            
+            const displayWidth = Math.round(img.naturalWidth * scale);
+            const displayHeight = Math.round(img.naturalHeight * scale);
+            
+            canvas.style.width = `${displayWidth}px`;
+            canvas.style.height = `${displayHeight}px`;
+            
+            // 清空画布并绘制原图
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            
+            // 过滤原图：把未知灰色部分转为完全透明
+            try {
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imgData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i+1];
+                    const b = data[i+2];
+                    // 灰度在 200 到 210 之间均判定为未知区域
+                    if (r >= 200 && r <= 210 && g >= 200 && g <= 210 && b >= 200 && b <= 210) {
+                        data[i+3] = 0; // 设为完全透明
+                    }
+                }
+                ctx.putImageData(imgData, 0, 0);
+            } catch (e) {
+                console.error("Failed to process transparency filter on map image", e);
+            }
+            
+            // 初始化 Undo 栈
+            editorUndoStack = [];
+            saveState();
+            
+            // 默认设置为橡皮擦模式并重置输入框
+            brushMode = "eraser";
+            toolEraser.classList.add("active-tool-btn");
+            toolBrush.classList.remove("active-tool-btn");
+            brushSizeInput.value = 6;
+            brushSize = 6;
+            brushSizeVal.innerText = "6 px";
+        };
+        
+        img.onerror = () => {
+            hideLoading();
+            showToast("拉取地图图像失败！", "error");
+        };
+    });
+
+    // B. 关闭编辑器
+    function closeEditor() {
+        modal.classList.add("hidden");
+        editorUndoStack = [];
+    }
+    
+    btnClose.addEventListener("click", closeEditor);
+    btnCancel.addEventListener("click", closeEditor);
+
+    // C. 工具切换
+    toolEraser.addEventListener("click", () => {
+        brushMode = "eraser";
+        toolEraser.classList.add("active-tool-btn");
+        toolBrush.classList.remove("active-tool-btn");
+    });
+
+    toolBrush.addEventListener("click", () => {
+        brushMode = "brush";
+        toolBrush.classList.add("active-tool-btn");
+        toolEraser.classList.remove("active-tool-btn");
+    });
+
+    // D. 粗细调节
+    brushSizeInput.addEventListener("input", (e) => {
+        brushSize = parseInt(e.target.value);
+        brushSizeVal.innerText = `${brushSize} px`;
+    });
+
+    // E. 撤销操作
+    btnUndo.addEventListener("click", () => {
+        if (editorUndoStack.length > 1) {
+            editorUndoStack.pop(); // 弹出当前
+            const lastData = editorUndoStack[editorUndoStack.length - 1];
+            ctx.putImageData(lastData, 0, 0);
+            showToast("已撤销上一步操作", "success");
+        } else {
+            showToast("已撤销到初始状态，无法继续撤销", "info");
+        }
+    });
+
+    // F. 重置操作 (支持撤销)
+    btnClear.addEventListener("click", () => {
+        if (editorUndoStack.length > 0) {
+            const initialData = editorUndoStack[0];
+            ctx.putImageData(initialData, 0, 0);
+            saveState();
+            showToast("已重置所有修改，你仍可以通过撤销按钮找回", "info");
+        }
+    });
+
+    // G. 绘图事件绑定 (鼠标)
+    canvas.addEventListener("mousedown", (e) => {
+        drawing = true;
+        const coords = getCanvasCoords(e);
+        lastX = coords.x;
+        lastY = coords.y;
+        drawSegment(lastX, lastY, lastX, lastY);
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+        if (!drawing) return;
+        const coords = getCanvasCoords(e);
+        drawSegment(lastX, lastY, coords.x, coords.y);
+        lastX = coords.x;
+        lastY = coords.y;
+    });
+
+    const stopDrawing = () => {
+        if (drawing) {
+            drawing = false;
+            saveState();
+        }
+    };
+
+    canvas.addEventListener("mouseup", stopDrawing);
+    canvas.addEventListener("mouseleave", stopDrawing);
+
+    // H. 绘图事件绑定 (移动端触控)
+    canvas.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        drawing = true;
+        const coords = getCanvasCoords(e);
+        lastX = coords.x;
+        lastY = coords.y;
+        drawSegment(lastX, lastY, lastX, lastY);
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", (e) => {
+        e.preventDefault();
+        if (!drawing) return;
+        const coords = getCanvasCoords(e);
+        drawSegment(lastX, lastY, coords.x, coords.y);
+        lastX = coords.x;
+        lastY = coords.y;
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", stopDrawing);
+
+    // I. 保存并重载地图
+    btnSave.addEventListener("click", () => {
+        if (!currentMap || !currentMap.name) {
+            showToast("地图状态丢失，保存失败", "error");
+            return;
+        }
+
+        showLoading("正在处理并保存地图，请稍候...");
+        const base64Data = canvas.toDataURL("image/png");
+        
+        fetch(`${API_BASE}/api/v1/maps/${currentMap.name}/edit`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                image_base64: base64Data
+            })
+        })
+        .then(res => {
+            if (!res.ok) {
+                return res.json().then(err => { throw new Error(err.detail || "保存失败") });
+            }
+            return res.json();
+        })
+        .then(data => {
+            closeEditor();
+            
+            // 刷新主地图展示
+            const mapImg = document.getElementById("map-image");
+            if (mapImg) {
+                showLoading("正在重新加载导航界面，请稍候...");
+                mapImg.src = `${API_BASE}/api/v1/maps/${currentMap.name}/image?t=${Date.now()}`;
+                
+                mapImg.onload = () => {
+                    hideLoading();
+                    showToast("🎉 地图修改并重载导航成功！", "success");
+                    
+                    // 重置小车历史轨迹并清空显示，避免由于地图变动导致坐标轻微错位
+                    robotTrajectory = [];
+                    drawTrajectory();
+                    drawPlannedPath();
+                };
+                mapImg.onerror = () => {
+                    hideLoading();
+                    showToast("更新地图界面失败，但地图已保存成功，请刷新网页", "warning");
+                };
+            } else {
+                hideLoading();
+                showToast("🎉 地图修改并重载导航成功！", "success");
+            }
+        })
+        .catch(err => {
+            hideLoading();
+            showToast(`保存失败：${err.message}`, "error");
+        });
+    });
 }

@@ -228,12 +228,15 @@ private:
                 break;
             case rclcpp_action::ResultCode::ABORTED:
                 RCLCPP_ERROR(this->get_logger(), "Goal was aborted.");
+                this->handle_patrol_failure("aborted");
                 return;
             case rclcpp_action::ResultCode::CANCELED:
                 RCLCPP_INFO(this->get_logger(), "Goal was canceled.");
+                this->handle_patrol_failure("canceled");
                 return;
             default:
                 RCLCPP_ERROR(this->get_logger(), "Unknown result code.");
+                this->handle_patrol_failure("failed");
                 return;
         }
 
@@ -247,6 +250,18 @@ private:
                 pause_timer_->reset();
             }
         }
+    }
+
+    void handle_patrol_failure(const std::string& reason) {
+        is_active_ = false;
+        current_waypoint_index_ = 0;
+        if (pause_timer_) {
+            pause_timer_->cancel();
+        }
+        std_msgs::msg::String fb_msg;
+        fb_msg.data = "interrupted_" + reason;
+        feedback_pub_->publish(fb_msg);
+        RCLCPP_WARN(this->get_logger(), "Patrol status reset due to interruption: %s", reason.c_str());
     }
 
     // ROS 2 通信对象

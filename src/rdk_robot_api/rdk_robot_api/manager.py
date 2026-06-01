@@ -44,6 +44,7 @@ scheduled_patrol_triggered = False
 # 巡逻过程中到达具体航点及完成巡逻的事件状态
 waypoint_reached_index = 0
 patrol_completed_triggered = False
+patrol_interrupted_reason = ""
 
 def terminate_process_group(process):
     """安全中止进程及其全部子进程组"""
@@ -96,6 +97,25 @@ async def broadcast_status_loop():
                 if completed_triggered:
                     m.patrol_completed_triggered = False
 
+                interrupted_reason = m.patrol_interrupted_reason
+                if interrupted_reason:
+                    m.patrol_interrupted_reason = ""
+
+                # 按需动态订阅/解绑 /map 话题以节省建图以外的计算开销
+                if (slam_running or explore_running):
+                    if rn.ros_node.map_sub is None:
+                        from nav_msgs.msg import OccupancyGrid
+                        rn.ros_node.map_sub = rn.ros_node.create_subscription(
+                            OccupancyGrid, "/map", rn.ros_node.map_callback, 10
+                        )
+                        rn.ros_node.get_logger().info("Subscribed to /map for live SLAM rendering.")
+                else:
+                    if rn.ros_node.map_sub is not None:
+                        rn.ros_node.destroy_subscription(rn.ros_node.map_sub)
+                        rn.ros_node.map_sub = None
+                        rn.ros_node.realtime_map_data = None
+                        rn.ros_node.get_logger().info("Unsubscribed from /map.")
+
                 status_data = {
                     "battery_percentage": round(rn.ros_node.battery_pct, 1),
                     "pose": rn.ros_node.robot_pose,
@@ -111,7 +131,9 @@ async def broadcast_status_loop():
                     "nav2_plan": rn.ros_node.nav2_path,
                     "scheduled_patrol_triggered": triggered,
                     "waypoint_reached": reached_idx,
-                    "patrol_completed": completed_triggered
+                    "patrol_completed": completed_triggered,
+                    "patrol_interrupted": interrupted_reason,
+                    "realtime_map": rn.ros_node.realtime_map_data
                 }
                 await manager.broadcast(status_data)
             except Exception:

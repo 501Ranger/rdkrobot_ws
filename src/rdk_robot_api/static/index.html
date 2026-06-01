@@ -70,16 +70,16 @@
                 <div class="topbar-status-group">
                     <div class="status-pill">
                         <span class="pill-dot" id="dot-api"></span>
-                        <span class="pill-label">API 服务:</span>
+                        <span class="pill-label"><span class="full-text">API 服务:</span><span class="short-text">API </span></span>
                         <span id="connection-status" class="status-badge offline">未连接</span>
                     </div>
                     <div class="status-pill">
                         <span class="pill-dot" id="dot-mcu"></span>
-                        <span class="pill-label">小车底盘:</span>
+                        <span class="pill-label"><span class="full-text">小车底盘:</span><span class="short-text">底盘 </span></span>
                         <span id="mcu-status" class="status-badge offline">离线</span>
                     </div>
                     <div class="status-pill battery-pill">
-                        <span class="pill-label">电量:</span>
+                        <span class="pill-label"><span class="full-text">电量:</span></span>
                         <div class="battery-icon">
                             <div id="battery-bar" class="battery-level" style="width: 0%"></div>
                             <div id="battery-charge-indicator" class="charge-indicator hidden">⚡</div>
@@ -275,6 +275,7 @@
                                             <button class="btn-tool" id="btn-zoom-in" title="放大">➕</button>
                                             <button class="btn-tool" id="btn-zoom-out" title="缩小">➖</button>
                                             <button class="btn-tool" id="btn-zoom-reset" title="重置">🏠</button>
+                                            <button class="btn-tool" id="btn-edit-current-map" title="编辑当前底图">✏️</button>
                                             <button class="btn-tool active-tool" id="btn-toggle-trajectory" title="显示/隐藏小车轨迹">👣</button>
                                             <button class="btn-tool" id="btn-clear-trajectory" title="清除小车轨迹">🧹</button>
                                         </div>
@@ -549,6 +550,43 @@
 
             </div>
         </main>
+    </div>
+
+    <!-- 地图修改编辑器弹窗 -->
+    <div id="map-editor-modal" class="map-editor-modal hidden">
+        <div class="map-editor-content">
+            <div class="map-editor-header">
+                <h3>🛠️ 地图修剪与围墙设定工具</h3>
+                <button class="btn-close-modal" id="btn-close-map-editor">✖</button>
+            </div>
+            <div class="map-editor-toolbar">
+                <button class="tool-btn active-tool-btn" id="tool-eraser">
+                    <span class="icon">🧹</span> 清除噪点 (白橡皮)
+                </button>
+                <button class="tool-btn" id="tool-brush">
+                    <span class="icon">🧱</span> 设定围墙 (黑画笔)
+                </button>
+                <div class="tool-param">
+                    <span>画笔粗细: </span>
+                    <input type="range" id="editor-brush-size" min="1" max="25" value="6">
+                    <span id="brush-size-val" class="brush-size-val">6 px</span>
+                </div>
+                <button class="btn btn-secondary" id="btn-editor-undo" style="padding: 8px 14px; font-size: 0.85rem;">↩️ 撤销</button>
+                <button class="btn btn-danger" id="btn-editor-clear" style="padding: 8px 14px; font-size: 0.85rem;">🧹 重置全部</button>
+            </div>
+            <div class="map-editor-workspace">
+                <div class="canvas-wrapper">
+                    <canvas id="map-editor-canvas"></canvas>
+                </div>
+            </div>
+            <div class="map-editor-footer">
+                <span class="hint-text">💡 说明：白色橡皮用于擦除 SLAM 离散的噪点区域；黑色画笔用于在障碍死角设定禁行围墙。</span>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" id="btn-editor-cancel">取消</button>
+                    <button class="btn btn-success" id="btn-editor-save">💾 保存并重载地图</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 悬浮弹窗提示组件 -->

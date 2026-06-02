@@ -2,6 +2,7 @@
 #include <cmath>
 #include <vector>
 #include <string>
+#include <mutex>
 #include <nav2_msgs/action/navigate_to_pose.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -110,9 +111,16 @@ private:
       if (pause_timer_) {
         pause_timer_->cancel();
       }
-      if (current_goal_handle_) {
+      GoalHandleNav::SharedPtr goal_to_cancel = nullptr;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (current_goal_handle_) {
+          goal_to_cancel = current_goal_handle_;
+        }
+      }
+      if (goal_to_cancel) {
         RCLCPP_INFO(this->get_logger(), "Canceling current navigation goal...");
-        action_client_->async_cancel_goal(current_goal_handle_);
+        action_client_->async_cancel_goal(goal_to_cancel);
       }
       RCLCPP_INFO(this->get_logger(), "Patrol paused.");
     } else if (cmd == "stop") {
@@ -120,9 +128,16 @@ private:
       if (pause_timer_) {
         pause_timer_->cancel();
       }
-      if (current_goal_handle_) {
+      GoalHandleNav::SharedPtr goal_to_cancel = nullptr;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (current_goal_handle_) {
+          goal_to_cancel = current_goal_handle_;
+        }
+      }
+      if (goal_to_cancel) {
         RCLCPP_INFO(this->get_logger(), "Canceling current navigation goal...");
-        action_client_->async_cancel_goal(current_goal_handle_);
+        action_client_->async_cancel_goal(goal_to_cancel);
       }
       current_waypoint_index_ = 0;
       RCLCPP_INFO(this->get_logger(), "Patrol stopped. Waypoint index reset to 0.");
@@ -136,8 +151,15 @@ private:
     RCLCPP_INFO(this->get_logger(), "Received %zu new waypoints dynamically.", msg->poses.size());
 
     // 如果当前有任务运行，先取消它
-    if (current_goal_handle_) {
-      action_client_->async_cancel_goal(current_goal_handle_);
+    GoalHandleNav::SharedPtr goal_to_cancel = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (current_goal_handle_) {
+        goal_to_cancel = current_goal_handle_;
+      }
+    }
+    if (goal_to_cancel) {
+      action_client_->async_cancel_goal(goal_to_cancel);
     }
     if (pause_timer_) {
       pause_timer_->cancel();
@@ -218,11 +240,15 @@ private:
           RCLCPP_ERROR(this->get_logger(), "Goal was rejected by server :(");
         } else {
           RCLCPP_INFO(this->get_logger(), "Goal accepted by server, waiting for result...");
+          std::lock_guard<std::mutex> lock(mutex_);
           this->current_goal_handle_ = goal_handle;
         }
       };
     send_goal_options.result_callback = [this](const GoalHandleNav::WrappedResult & result) {
-        this->current_goal_handle_ = nullptr;
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          this->current_goal_handle_ = nullptr;
+        }
         this->get_result_callback(result);
       };
 
@@ -284,6 +310,7 @@ private:
   // ROS 2 通信对象
   rclcpp_action::Client<NavigateToPose>::SharedPtr action_client_;
   GoalHandleNav::SharedPtr current_goal_handle_;
+  std::mutex mutex_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr waypoints_sub_;
   rclcpp::TimerBase::SharedPtr pause_timer_;

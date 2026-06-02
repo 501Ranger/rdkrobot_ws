@@ -4,14 +4,14 @@ from fastapi import APIRouter, HTTPException
 
 from .. import manager as m
 from ..config import robot_config
+from ..utils import check_docker_container
 
 router = APIRouter(prefix="/api/v1/agent", tags=["Agent"])
 
 @router.post("/start")
 def start_microros_agent():
     """启动 micro-ROS 串口代理 (Docker)"""
-    res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
-    if res == 0:
+    if check_docker_container("microros_agent"):
         return {"status": "success", "message": "micro-ROS agent is already running."}
         
     os.system("docker kill microros_agent >/dev/null 2>&1 || true")
@@ -48,6 +48,5 @@ def stop_microros_agent():
 @router.get("/status")
 def get_microros_agent_status():
     """获取 micro-ROS 代理的运行状态"""
-    res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
-    running = (res == 0)
+    running = check_docker_container("microros_agent")
     return {"running": running}

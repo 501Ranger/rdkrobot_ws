@@ -48,12 +48,103 @@ fi
 
 # 4. 启动容器进行 ARM64 编译
 echo ">>> [4/5] 启动 Docker 容器进行 ARM64 编译 (colcon build)..."
+
+# 解析参数
+FORCE_BUILD=false
+SPECIFIED_PACKAGES=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -f|--force)
+      FORCE_BUILD=true
+      shift
+      ;;
+    *)
+      SPECIFIED_PACKAGES+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#SPECIFIED_PACKAGES[@]} -gt 0 ]; then
+  BUILD_ARGS="--packages-select ${SPECIFIED_PACKAGES[*]}"
+  echo ">>> 检测到手动指定了编译包: ${SPECIFIED_PACKAGES[*]}"
+elif [ "$FORCE_BUILD" = true ]; then
+  BUILD_ARGS="--packages-skip multirobot_map_merge"
+  echo ">>> 已启用强制全量编译..."
+else
+  echo ">>> 正在分析工作空间中发生修改的 ROS 2 功能包..."
+  CHANGED_PKGS=$(python3 -c "
+import subprocess, os
+def get_changed():
+    changed = set()
+    try:
+        res = subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], capture_output=True, text=True)
+        if res.returncode != 0 or 'true' not in res.stdout.lower():
+            return 'ALL'
+        files = []
+        s_res = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)
+        for line in s_res.stdout.strip().split('\n'):
+            if line:
+                parts = line.strip().split(None, 1)
+                if len(parts) >= 2: files.append(parts[1])
+        d_res = subprocess.run(['git', 'diff', 'HEAD~1', '--name-only'], capture_output=True, text=True)
+        if d_res.returncode == 0:
+            for line in d_res.stdout.strip().split('\n'):
+                if line and line not in files: files.append(line)
+        for f in files:
+            if f.startswith('src/'):
+                parts = f.split('/')
+                if len(parts) >= 3:
+                    pkg_dir = os.path.join(parts[0], parts[1])
+                    if os.path.exists(os.path.join(pkg_dir, 'package.xml')):
+                        try:
+                            import xml.etree.ElementTree as ET
+                            tree = ET.parse(os.path.join(pkg_dir, 'package.xml'))
+                            root = tree.getroot()
+                            name = root.find('name')
+                            if name is not None: changed.add(name.text.strip())
+                        except:
+                            changed.add(parts[1])
+    except:
+        return 'ALL'
+    return ' '.join(sorted(list(changed))) if changed else 'NONE'
+print(get_changed())
+")
+
+  if [ "$CHANGED_PKGS" = "ALL" ]; then
+    BUILD_ARGS="--packages-skip multirobot_map_merge"
+    echo ">>> Git 状态不可达或不在仓库中，默认执行全量编译..."
+  elif [ "$CHANGED_PKGS" = "NONE" ]; then
+    echo "=================================================="
+    echo "  💡 提示: 未检测到发生修改的功能包。"
+    echo "  如果您需要强制全量编译，请使用: ./scripts/build_arm64.sh -f"
+    echo "  或者直接指定特定包名进行编译: ./scripts/build_arm64.sh <包名>"
+    echo "=================================================="
+    exit 0
+  else
+    # 过滤掉不需要编译的 multirobot_map_merge
+    FILTERED_PKGS=()
+    for pkg in ${CHANGED_PKGS}; do
+      if [ "$pkg" != "multirobot_map_merge" ]; then
+        FILTERED_PKGS+=("$pkg")
+      fi
+    done
+    if [ ${#FILTERED_PKGS[@]} -eq 0 ]; then
+      echo ">>> 变动包仅为排除包，无需执行编译。"
+      exit 0
+    fi
+    BUILD_ARGS="--packages-select ${FILTERED_PKGS[*]}"
+    echo ">>> 检测到以下被修改的功能包，将执行增量编译: ${FILTERED_PKGS[*]}"
+  fi
+fi
+
 echo "⚠️  注意: 为防止 QEMU 模拟多线程编译发生段错误(Segfault)，我们将限制使用单线程顺序编译..."
 docker run --rm \
   -v "${WORKSPACE_DIR}":/workspace \
   -w /workspace \
   rdk_robot_build:arm64 \
-  bash -c "source /opt/ros/humble/setup.bash && export MAKEFLAGS=-j1 && colcon build --packages-skip multirobot_map_merge --build-base build_arm64 --install-base install_arm64 --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=None -DCMAKE_CXX_FLAGS='-O1' -DCMAKE_C_FLAGS='-O1' -DBUILD_TESTING=OFF"
+  bash -c "source /opt/ros/humble/setup.bash && export MAKEFLAGS=-j1 && colcon build ${BUILD_ARGS} --build-base build_arm64 --install-base install_arm64 --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=None -DCMAKE_CXX_FLAGS='-O1' -DCMAKE_C_FLAGS='-O1' -DBUILD_TESTING=OFF"
 
 # 5. 将编译产物的属主和属组修改回宿主机当前用户，避免权限冲突
 echo ">>> [5/5] 正在修复编译产物权限为宿主机用户..."

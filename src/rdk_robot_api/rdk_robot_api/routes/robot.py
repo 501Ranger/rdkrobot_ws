@@ -11,6 +11,8 @@ from .. import ros_node as rn
 from .. import manager as m
 from ..config import static_dir, robot_config, WORKSPACE_SETUP_BASH, CONFIG_PATH
 from ..models import HardwareInitPayload
+from ..utils import check_docker_container
+from ..manager import add_system_log
 
 router = APIRouter(tags=["Robot"])
 
@@ -61,8 +63,7 @@ def get_robot_status():
                  
     slam_running = (m.slam_process is not None)
     explore_running = (m.explore_process is not None)
-    agent_res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
-    agent_running = (agent_res == 0) or (m.agent_process is not None)
+    agent_running = check_docker_container("microros_agent") or (m.agent_process is not None)
     sim_running = (m.sim_process is not None)
     base_running = (m.base_process is not None)
     lidar_running = (m.lidar_process is not None)
@@ -90,6 +91,8 @@ def get_robot_status():
 @router.post("/api/v1/robot/hardware/init")
 def init_real_robot_hardware(payload: HardwareInitPayload):
     """一键初始化实机底层硬件驱动（串口代理、底盘TF/状态发布、雷达驱动）"""
+    m.hardware_manually_stopped = False
+    add_system_log("INFO", "执行【一键初始化底层硬件】指令...")
     global robot_config
     
     config_changed = False
@@ -118,8 +121,7 @@ def init_real_robot_hardware(payload: HardwareInitPayload):
     status_info = []
     
     # 1. 启动 micro-ROS 串口代理
-    agent_res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
-    agent_running = (agent_res == 0) or ((m.agent_process is not None) and (m.agent_process.poll() is None))
+    agent_running = check_docker_container("microros_agent") or ((m.agent_process is not None) and (m.agent_process.poll() is None))
     if not agent_running:
         os.system("docker kill microros_agent >/dev/null 2>&1 || true")
         os.system("docker rm microros_agent >/dev/null 2>&1 || true")
@@ -184,7 +186,7 @@ def init_real_robot_hardware(payload: HardwareInitPayload):
                 # 重置解锁状态与静默帧
                 from .. import ros_node as rn
                 if rn.ros_node:
-                    rn.ros_node._joy_unlocked = False
+                    rn.ros_node._joy_unlocked = True
                     rn.ros_node._joy_suppress_frames = 10
                 status_info.append("joy_node automatically started (gamepad detected)")
             except Exception as e:
@@ -199,6 +201,8 @@ def init_real_robot_hardware(payload: HardwareInitPayload):
 @router.post("/api/v1/robot/hardware/stop")
 def stop_real_robot_hardware():
     """停止实机底层硬件驱动（串口代理、底盘TF、雷达驱动、手柄驱动）"""
+    m.hardware_manually_stopped = True
+    add_system_log("WARNING", "执行【一键停用底层硬件】指令...")
     status_info = []
     
     # 停止串口代理
@@ -258,7 +262,7 @@ def start_host_joy():
             # 重置解锁状态与静默帧
             from .. import ros_node as rn
             if rn.ros_node:
-                rn.ros_node._joy_unlocked = False
+                rn.ros_node._joy_unlocked = True
                 rn.ros_node._joy_suppress_frames = 10
             return {"status": "success", "detail": "成功拉起主机手柄驱动节点。"}
         except Exception as e:

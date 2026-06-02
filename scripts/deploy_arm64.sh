@@ -8,6 +8,7 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${WORKSPACE_DIR}"
 
 LOCAL_INSTALL_DIR="install_arm64"
+CONFIG_FILE="${WORKSPACE_DIR}/.deploy_config"
 
 # 检查本地编译产物目录是否存在
 if [ ! -d "${LOCAL_INSTALL_DIR}" ]; then
@@ -17,16 +18,39 @@ if [ ! -d "${LOCAL_INSTALL_DIR}" ]; then
     exit 1
 fi
 
-# 从环境变量中读取默认参数，如果不存在则使用默认值
-RDK_IP="${RDK_IP:-}"
-RDK_USER="${RDK_USER:-sunrise}"
-RDK_DIR="${RDK_DIR:-~/rdkrobot_ws/install}"
+# 参数解析：清除/重置配置
+if [ "$1" == "--reset" ] || [ "$1" == "-r" ]; then
+    if [ -f "${CONFIG_FILE}" ]; then
+        rm -f "${CONFIG_FILE}"
+        echo "🧹 已清除保存的默认部署配置。"
+    else
+        echo "💡 未检测到已保存的默认配置，无需清除。"
+    fi
+    exit 0
+fi
 
-# 如果 IP 未通过环境变量或参数传入，则进入交互式输入
+# 1. 尝试从本地配置文件中加载配置
+RDK_IP=""
+RDK_USER="sunrise"
+RDK_DIR="~/rdkrobot_ws/install"
+
+if [ -f "${CONFIG_FILE}" ]; then
+    # 读取配置
+    source "${CONFIG_FILE}"
+    echo "=================================================="
+    echo "💾 加载已保存的默认部署配置："
+    echo "   板卡 IP:    ${RDK_IP}"
+    echo "   SSH 用户:   ${RDK_USER}"
+    echo "   目标路径:   ${RDK_DIR}"
+    echo "   (若需重置，请运行: ./scripts/deploy_arm64.sh --reset)"
+    echo "=================================================="
+fi
+
+# 2. 如果配置中没有 RDK_IP，则进入交互式引导输入
 if [ -z "${RDK_IP}" ]; then
     RDK_IP_DEFAULT="172.20.10.4"
     echo "=================================================="
-    echo "            RDK X5 一键部署脚本"
+    echo "            RDK X5 一键部署配置引导"
     echo "=================================================="
     echo -n "请输入 RDK X5 板卡的 IP 地址 [默认: ${RDK_IP_DEFAULT}]: "
     read input_ip
@@ -46,6 +70,53 @@ if [ -z "${RDK_IP}" ]; then
     read input_dir
     if [ -n "${input_dir}" ]; then
         RDK_DIR="${input_dir}"
+    fi
+    
+    # 交互询问是否保存为默认配置
+    echo -n "是否将以上配置保存为默认设置，下次直接一键完成？[Y/n]: "
+    read save_choice
+    if [ "${save_choice}" != "n" ] && [ "${save_choice}" != "N" ]; then
+        cat << EOF > "${CONFIG_FILE}"
+RDK_IP="${RDK_IP}"
+RDK_USER="${RDK_USER}"
+RDK_DIR="${RDK_DIR}"
+EOF
+        echo "💾 配置已成功保存至 .deploy_config，并已加入 .gitignore 中进行保护。"
+    fi
+fi
+
+# 3. 自适应免密 SSH 连接检测与自动公钥配置
+echo "🔍 正在检测与小车的免密 SSH 连接状态..."
+# PasswordAuthentication=no 确保如果没配免密直接返回失败，不进入密码挂起输入
+if ssh -o PasswordAuthentication=no -o ConnectTimeout=3 "${RDK_USER}@${RDK_IP}" "true" &>/dev/null; then
+    echo "🔓 免密状态: 已就绪，将全自动免密部署！"
+else
+    echo "🔒 免密状态: 未配置，当前连接板卡需要手动输入密码。"
+    echo -n "是否现在一键配置 SSH 免密公钥登录，避免以后输入密码？[Y/n]: "
+    read setup_key
+    if [ "${setup_key}" != "n" ] && [ "${setup_key}" != "N" ]; then
+        # 宿主机如未生成密钥对，则自动生成
+        if [ ! -f ~/.ssh/id_rsa.pub ]; then
+            echo "🔑 未检测到本地 SSH 密钥，正在生成 RSA 密钥对..."
+            # -N "" 为空密码，-f 指定路径
+            ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+        fi
+        
+        echo "🚀 正在安装公钥到 RDK X5 板卡..."
+        echo "👉 请在下方输入一次板卡 SSH 登录密码以完成配对："
+        if command -v ssh-copy-id &> /dev/null; then
+            ssh-copy-id -i ~/.ssh/id_rsa.pub "${RDK_USER}@${RDK_IP}"
+        else
+            # 兼容无 ssh-copy-id 命令的宿主机系统
+            cat ~/.ssh/id_rsa.pub | ssh "${RDK_USER}@${RDK_IP}" "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+        fi
+        
+        # 验证是否配置成功
+        if ssh -o PasswordAuthentication=no -o ConnectTimeout=3 "${RDK_USER}@${RDK_IP}" "true" &>/dev/null; then
+            echo "✨ 恭喜！SSH 免密登录配置成功！"
+        else
+            echo "⚠️  配对验证失败，本次部署仍需输入密码。建议检查板卡 SSH 权限。"
+        fi
     fi
 fi
 

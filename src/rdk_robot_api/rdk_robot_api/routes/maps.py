@@ -16,6 +16,8 @@ from .. import ros_node as rn
 from .. import manager as m
 from .. import config
 from ..models import POIPayload
+from ..utils import check_docker_container
+import asyncio
 
 router = APIRouter(prefix="/api/v1/maps", tags=["Maps"])
 
@@ -118,7 +120,7 @@ def get_map_image(map_name: str):
     return StreamingResponse(BytesIO(encoded_img.tobytes()), media_type="image/png")
 
 @router.post("/{map_name}/load")
-def load_map_into_navigation(map_name: str):
+async def load_map_into_navigation(map_name: str):
     """动态将指定地图载入 Nav2 导航系统"""
     if not rn.ros_node:
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
@@ -146,7 +148,7 @@ def load_map_into_navigation(map_name: str):
         ]
         try:
             m.loc_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
-            time.sleep(3.0)
+            await asyncio.sleep(3.0)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start localization launch: {e}")
     else:
@@ -160,7 +162,7 @@ def load_map_into_navigation(map_name: str):
         if rn.ros_node.load_map_cli.service_is_ready():
             service_ready = True
             break
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     if not service_ready:
         raise HTTPException(
@@ -177,9 +179,9 @@ def load_map_into_navigation(map_name: str):
     start_time = time.time()
     timeout = 10.0
     while not future.done():
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
         if time.time() - start_time > timeout:
-            raise HTTPException(status_code=504, detail="Timeout waiting for Nav2 map_server to load map")
+            raise HTTPException(status_code=544, detail="Timeout waiting for Nav2 map_server to load map")
             
     res = future.result()
     if res.result == 0:
@@ -188,7 +190,7 @@ def load_map_into_navigation(map_name: str):
         # 地图加载成功后，自动向 AMCL 发布初始位姿 (0, 0, 0)
         # 这使 AMCL 立即开始发布 map->odom TF，解除 costmap 的 "map frame not exist" 报错
         # 实际场景中用户应随后使用"一键全局重定位"来获得精确定位
-        time.sleep(1.5)  # 等待 AMCL 节点完成激活
+        await asyncio.sleep(1.5)  # 等待 AMCL 节点完成激活
         rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
         rn.ros_node.get_logger().info(
             f"Map '{map_name}' loaded. Auto-published initial pose (0,0,0) to bootstrap AMCL TF."

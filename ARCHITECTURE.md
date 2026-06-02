@@ -19,14 +19,26 @@ rdkrobot_ws/
 │   ├── rdk_robot_api/         # Python API 服务与 HMI 静态网页包
 │   │   ├── config/            # 统一参数配置文件 robot_params.yaml
 │   │   ├── static/            # 网页 HMI 静态资源层 (HTML, CSS, JS)
+│   │   │   ├── index.html     # 控制舱主页
+│   │   │   ├── css/           # HMI 拟态样式
+│   │   │   └── js/            # 模块化前端 JS 控制层
+│   │   │       ├── app.js     # 全局变量与主入口
+│   │   │       ├── ui.js      # 主题、通知与弹出提示 UI 逻辑
+│   │   │       ├── websocket.js # 遥测推送与双轨 HTTP 容错轮询
+│   │   │       ├── map.js     # SVG地图、轨迹、缩放与编辑器
+│   │   │       ├── gamepad.js # 蓝牙手柄、虚拟摇杆与键盘控制
+│   │   │       ├── navigation.js # 地图加载、坐标导航与 POI 管理
+│   │   │       └── patrol.js  # 多点巡逻与定时计划下发
 │   │   ├── requirements.txt   # Python Web 服务依赖项清单
 │   │   └── rdk_robot_api/     # API 服务逻辑子包 (模块化重构)
 │   │       ├── main.py        # 服务主入口 (路由注册与子进程清理)
+│   │       ├── log_manager.py # 导航与巡逻任务日志持久化管理器
 │   │       ├── scheduler.py   # 定时巡逻持久化调度器
 │   │       ├── config.py      # 路径与 yaml 全局配置加载器
 │   │       ├── models.py      # Pydantic 统一数据请求载荷模型
 │   │       ├── manager.py     # 进程管理器与 WebSocket 广播逻辑
 │   │       ├── ros_node.py    # RobotApiNode 节点类 (ActionClient 封装)
+│   │       ├── utils.py       # 带防抖缓存的 Docker 状态检测等工具
 │   │       └── routes/        # RESTful 业务接口分路由子包
 │   │           ├── system.py  # 主机环境与 CPU 架构 API
 │   │           ├── robot.py   # 状态与 WebSocket 广播，及底层硬件（串口代理/TF/雷达）一键初始化/停用 API
@@ -98,3 +110,5 @@ HMI 服务端在后台维护一个 ROS 2 守护线程，运行中介节点 `Robo
 - **滑屏拖拽防误触**：移动端单指拖拽平移地图时，若位移大于 5 像素，松开时会自动屏蔽点击取点事件，防止误触导航。
 - **深色/浅色主题双轨切换**：Header 支持 🌙/☀️ 切换键，浅色皮肤具备精美白色毛玻璃质感，主题选择信息由 LocalStorage 持久化存储。
 - **XBOX 蓝牙手柄遥控**：支持标准 XBOX 协议蓝牙手柄，具备“电动车刹车式”手柄单次 LT/RT 键 Ready 安全解锁控制保护机制，并在 Web HMI 网页控制舱提供实时的使能锁状态可视化徽章反馈（已锁定/READY）。配有 10 帧连接自检静默抑制与高频防抖中位刹车限流算法，以及摇杆偏移可视化十字坐标指示盘。
+- **导航历史与任务日志**：实现对小车单点导航 and 多点巡逻任务生命周期的实时监控与路程累加（10Hz 判定并采用 0.02m 噪声过滤门限）。历史日志持久化存储于 `~/.rdk_robot/navigation_logs.json`，上限 300 条。网页 HMI 控制舱在“巡逻与任务”视图中增加毛玻璃拟态的日志历史看板，使用原生 SVG 与 CSS 动画渲染任务成功率圆环和近 7 天日任务频次柱状图，支持类型/状态过滤筛选、单条日志删除 `🗑️` 及一键清空日志功能。
+

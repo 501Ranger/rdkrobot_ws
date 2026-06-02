@@ -9,6 +9,7 @@ from .. import ros_node as rn
 from .. import manager as m
 from ..config import MAPS_DIR, WORKSPACE_SETUP_BASH
 from ..models import MapSavePayload
+import asyncio
 
 router = APIRouter(prefix="/api/v1/slam", tags=["SLAM"])
 
@@ -71,7 +72,7 @@ def _auto_start_nav2_after_delay(use_sim: bool, delay: float = 8.0):
             rn.ros_node.get_logger().error(f"Auto-Nav2: Failed to start Nav2: {e}")
 
 @router.post("/start")
-def start_slam_mapping():
+async def start_slam_mapping():
     """启动 SLAM 建图"""
     # 1. 检查并确保定位节点（map_server/amcl）挂起，释放 /map 话题 and TF，防止冲突
     if m.loc_process and m.loc_process.poll() is None:
@@ -93,7 +94,7 @@ def start_slam_mapping():
                 odom_ready = True
                 rn.ros_node.get_logger().info("/odom is active. Proceeding to start SLAM.")
                 break
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
         if not odom_ready:
             raise HTTPException(
                 status_code=503,

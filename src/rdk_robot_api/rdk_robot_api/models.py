@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 class CommandPayload(BaseModel):
     cmd: str = Field(..., description="指令：'start', 'pause', 'stop', 'resume'")
@@ -32,9 +32,10 @@ class NavGoPayload(BaseModel):
     poi_name: str = Field(None, description="语义点名称（若提供此参数，则忽略 x, y, yaw 并匹配该点的坐标）")
 
 class HardwareInitPayload(BaseModel):
-    agent_port: str = Field(None, description="micro-ROS 串口号")
-    lidar_port: str = Field(None, description="雷达驱动串口号")
+    agent_port: Optional[str] = Field(default=None, description="micro-ROS 串口号")
+    lidar_port: Optional[str] = Field(default=None, description="雷达驱动串口号")
 
 class BluetoothConnectPayload(BaseModel):
     mac: str = Field(..., description="蓝牙设备的 MAC 地址")
+
 

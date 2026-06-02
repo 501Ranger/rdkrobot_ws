@@ -6,6 +6,7 @@ import subprocess
 import re
 from fastapi import APIRouter
 from ..models import BluetoothConnectPayload
+from ..config import __version__
 
 router = APIRouter(prefix="/api/v1/system", tags=["System"])
 
@@ -31,24 +32,34 @@ def get_system_info():
     return {
         "is_arm": is_arm,
         "machine": machine,
-        "hardware_platform": device_model
+        "hardware_platform": device_model,
+        "version": __version__
     }
+
+import time
+
+_last_net_io = None
+_last_net_time = None
 
 @router.get("/status")
 def get_system_status():
-    """获取系统 CPU、内存占用率及内核温度，用于 HMI 实时看板展示"""
+    """获取系统 CPU、内存占用率、内核温度以及网络上下行速率，用于 HMI 实时看板展示"""
+    global _last_net_io, _last_net_time
+    
     cpu_usage = psutil.cpu_percent(interval=None)
     mem_usage = psutil.virtual_memory().percent
     
     cpu_temp = 0.0
     try:
-        if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
-            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-                temp_str = f.read().strip()
-                temp_val = float(temp_str)
-                if temp_val > 1000:
-                    temp_val /= 1000.0
-                cpu_temp = round(temp_val, 1)
+        if os.path.exists("/proc/device-tree/model") or os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
+            # 嵌入式 Linux 首选 thermal_zone0
+            if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
+                with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                    temp_str = f.read().strip()
+                    temp_val = float(temp_str)
+                    if temp_val > 1000:
+                        temp_val /= 1000.0
+                    cpu_temp = round(temp_val, 1)
         elif hasattr(psutil, "sensors_temperatures"):
             temps = psutil.sensors_temperatures()
             found = False
@@ -63,10 +74,29 @@ def get_system_status():
     except Exception:
         pass
         
+    # 计算网络上传/下载速率 (KB/s)
+    current_net_io = psutil.net_io_counters()
+    current_time = time.time()
+    net_down_speed = 0.0
+    net_up_speed = 0.0
+    
+    if _last_net_io is not None and _last_net_time is not None:
+        dt = current_time - _last_net_time
+        if dt > 0:
+            bytes_recv = current_net_io.bytes_recv - _last_net_io.bytes_recv
+            bytes_sent = current_net_io.bytes_sent - _last_net_io.bytes_sent
+            net_down_speed = round((bytes_recv / 1024.0) / dt, 1)
+            net_up_speed = round((bytes_sent / 1024.0) / dt, 1)
+            
+    _last_net_io = current_net_io
+    _last_net_time = current_time
+        
     return {
         "cpu": cpu_usage,
         "memory": mem_usage,
-        "temperature": cpu_temp
+        "temperature": cpu_temp,
+        "net_down": net_down_speed,
+        "net_up": net_up_speed
     }
 
 @router.get("/serial-ports")
@@ -148,6 +178,23 @@ def disconnect_bluetooth_device(payload: BluetoothConnectPayload):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+def is_gamepad(name: str, info_text: str) -> bool:
+    """辅助判断蓝牙设备是否为手柄/游戏控制器"""
+    name_lower = name.lower()
+    gamepad_keywords = ["xbox", "controller", "gamepad", "joystick", "joy-con", "dualshock", "dualsense"]
+    # 1. 检查设备名是否包含手柄关键字
+    if any(kw in name_lower for kw in gamepad_keywords):
+        return True
+    
+    # 2. 检查 Icon 是否为 input-gaming
+    icon_match = re.search(r"Icon:\s+(\S+)", info_text)
+    if icon_match:
+        icon_type = icon_match.group(1).lower()
+        if icon_type == "input-gaming":
+            return True
+            
+    return False
+
 @router.get("/bluetooth/status")
 def get_bluetooth_status():
     """获取当前主机连接的手柄状态以及设备名称"""
@@ -159,9 +206,12 @@ def get_bluetooth_status():
             name_match = re.search(r"Name:\s+(.*)", res.stdout)
             mac = mac_match.group(1) if mac_match else ""
             name = name_match.group(1) if name_match else "Xbox Wireless Controller"
-            return {"connected": True, "mac": mac, "name": name}
+            
+            # 校验是否为手柄，过滤掉蓝牙耳机、音箱等音频/非输入设备
+            if is_gamepad(name, res.stdout):
+                return {"connected": True, "mac": mac, "name": name}
         
-        # 兜底查询已配对的设备列表看其中有没有被激活的
+        # 兜底查询已配对的设备列表看其中有没有被激活的手柄
         paired_res = subprocess.run(["bluetoothctl", "paired-devices"], capture_output=True, text=True)
         for line in paired_res.stdout.strip().split("\n"):
             parts = line.split(" ", 2)
@@ -170,9 +220,33 @@ def get_bluetooth_status():
                 name = parts[2]
                 info = subprocess.run(["bluetoothctl", "info", mac], capture_output=True, text=True)
                 if "Connected: yes" in info.stdout:
-                    return {"connected": True, "mac": mac, "name": name}
+                    if is_gamepad(name, info.stdout):
+                        return {"connected": True, "mac": mac, "name": name}
                     
         return {"connected": False, "mac": "", "name": ""}
     except Exception as e:
         return {"connected": False, "mac": "", "name": "", "error": str(e)}
+
+@router.post("/shutdown")
+def shutdown_system():
+    """安全关闭系统"""
+    try:
+        import threading
+        from ..manager import add_system_log
+        add_system_log("WARNING", "安全关机指令已被执行。系统将在 1 秒后开始切断电源关机...")
+        
+        def execute_shutdown():
+            import time
+            time.sleep(1.0)
+            # 双重保险关机：优先使用免密的 systemctl，失败则使用免密的 sudo shutdown
+            res = subprocess.run(["systemctl", "poweroff", "--no-ask-password"], capture_output=True, text=True)
+            if res.returncode != 0:
+                subprocess.run(["sudo", "-n", "shutdown", "-h", "now"], capture_output=True)
+                
+        threading.Thread(target=execute_shutdown, daemon=True).start()
+        return {"status": "success", "message": "系统关机指令已成功下发，正在安全关闭上位机..."}
+    except Exception as e:
+        return {"status": "error", "message": f"关机指令下发失败: {str(e)}"}
+
+
 

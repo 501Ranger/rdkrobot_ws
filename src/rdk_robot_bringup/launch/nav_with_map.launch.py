@@ -31,7 +31,7 @@ def generate_launch_description():
     nav2_bringup_share = get_package_share_directory("nav2_bringup")
 
     # 默认使用实机建好的静态地图
-    default_map = os.path.join(pkg_share, "maps", "my_map.yaml")
+    default_map = os.path.join(pkg_share, "maps", "string.yaml")
     default_nav2_params = os.path.join(pkg_share, "config", "nav2_params.yaml")
 
     map_yaml_file = LaunchConfiguration("map")

@@ -3,8 +3,24 @@ import signal
 import subprocess
 import time
 import asyncio
+import logging
+import sys
+import datetime
 from typing import List
 from fastapi import WebSocket
+
+from .utils import check_docker_container
+
+# 全局重大系统日志队列
+system_logs = [{"time": datetime.datetime.now().strftime("%H:%M:%S"), "level": "INFO", "message": "API 服务日志终端初始化成功"}]
+
+def add_system_log(level: str, message: str):
+    """添加一条重大系统日志"""
+    now = datetime.datetime.now().strftime("%H:%M:%S")
+    system_logs.append({"time": now, "level": level, "message": message})
+    if len(system_logs) > 20:
+        system_logs.pop(0)
+
 
 # WebSocket 连接管理器
 class ConnectionManager:
@@ -20,42 +36,16 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        disconnected = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception:
-                pass
+                disconnected.append(connection)
+        for connection in disconnected:
+            self.disconnect(connection)
 
 manager = ConnectionManager()
-
-# 全局子进程控制变量
-slam_process = None
-explore_process = None
-loc_process = None
-nav2_process = None
-sim_process = None
-agent_process = None
-base_process = None
-lidar_process = None
-joy_process = None
-
-
-# 定时巡逻触发事件广播标志
-scheduled_patrol_triggered = False
-
-# 巡逻过程中到达具体航点及完成巡逻的事件状态
-waypoint_reached_index = 0
-patrol_completed_triggered = False
-patrol_interrupted_reason = ""
-
-def check_and_reset_process(process, name):
-    if process is not None:
-        if process.poll() is not None:
-            from . import ros_node as rn
-            if rn.ros_node:
-                rn.ros_node.get_logger().warn(f"Process [{name}] exited with code {process.poll()}")
-            return None
-    return process
 
 def terminate_process_group(process):
     """安全中止进程及其全部子进程组"""
@@ -75,10 +65,59 @@ def terminate_process_group(process):
         except subprocess.TimeoutExpired:
             process.kill()
 
+# 进程管理器容器
+class ProcessManager:
+    def __init__(self):
+        self._processes = {
+            "slam": None,
+            "explore": None,
+            "localization": None,
+            "nav2": None,
+            "sim": None,
+            "agent": None,
+            "base": None,
+            "lidar": None,
+            "joy": None
+        }
+
+    def get_process(self, name: str):
+        p = self._processes.get(name)
+        if p is not None:
+            if p.poll() is not None:
+                exit_code = p.poll()
+                from . import ros_node as rn
+                if rn.ros_node:
+                    rn.ros_node.get_logger().warn(f"Process [{name}] exited with code {exit_code}")
+                add_system_log("ERROR", f"进程 [{name}] 异常退出，退出码: {exit_code}")
+                self._processes[name] = None
+        return self._processes.get(name)
+
+    def set_process(self, name: str, process):
+        self._processes[name] = process
+        if process is not None:
+            add_system_log("INFO", f"成功启动 [{name}] 服务进程")
+
+    def stop(self, name: str):
+        p = self._processes.get(name)
+        if p:
+            terminate_process_group(p)
+            self._processes[name] = None
+            add_system_log("WARNING", f"已安全关闭 [{name}] 服务进程")
+
+
+process_manager = ProcessManager()
+
+# 定时巡逻触发事件广播标志
+scheduled_patrol_triggered = False
+
+# 巡逻过程中到达具体航点及完成巡逻的事件状态
+waypoint_reached_index = 0
+patrol_completed_triggered = False
+patrol_interrupted_reason = ""
+hardware_manually_stopped = False
+
 async def broadcast_status_loop():
     from . import ros_node as rn # 延迟导入，防止循环引用
-    from . import manager as m
-    global slam_process, explore_process, loc_process, nav2_process, sim_process, agent_process, base_process, lidar_process, joy_process
     while True:
         if rn.ros_node:
             try:
@@ -89,44 +128,34 @@ async def broadcast_status_loop():
                 mcu_online = (current_time - status_dict["last_battery_time"] < 3.0) or \
                              (current_time - status_dict["last_odom_time"] < 3.0)
                 
-                # 监控子进程存活并重置已退出进程
-                m.slam_process = check_and_reset_process(m.slam_process, "slam")
-                m.explore_process = check_and_reset_process(m.explore_process, "explore")
-                m.loc_process = check_and_reset_process(m.loc_process, "localization")
-                m.nav2_process = check_and_reset_process(m.nav2_process, "nav2")
-                m.sim_process = check_and_reset_process(m.sim_process, "sim")
-                m.agent_process = check_and_reset_process(m.agent_process, "agent")
-                m.base_process = check_and_reset_process(m.base_process, "base")
-                m.lidar_process = check_and_reset_process(m.lidar_process, "lidar")
-                m.joy_process = check_and_reset_process(m.joy_process, "joy")
-
-                slam_running = (m.slam_process is not None)
-                explore_running = (m.explore_process is not None)
+                slam_running = (process_manager.get_process("slam") is not None)
+                explore_running = (process_manager.get_process("explore") is not None)
                 
-                # 检测 micro-ROS 代理是否在运行
-                agent_res = os.system("docker ps --filter name=microros_agent | grep microros_agent >/dev/null 2>&1")
-                agent_running = (agent_res == 0) or (m.agent_process is not None)
+                # 检测 micro-ROS 代理是否在运行 (使用 1.5 秒缓存 check)
+                agent_running = check_docker_container("microros_agent") or (process_manager.get_process("agent") is not None)
                 
-                sim_running = (m.sim_process is not None)
-                base_running = (m.base_process is not None)
-                lidar_running = (m.lidar_process is not None)
-                joy_running = (m.joy_process is not None)
+                sim_running = (process_manager.get_process("sim") is not None)
+                base_running = (process_manager.get_process("base") is not None)
+                lidar_running = (process_manager.get_process("lidar") is not None)
+                joy_running = (process_manager.get_process("joy") is not None)
                 
-                triggered = m.scheduled_patrol_triggered
+                global scheduled_patrol_triggered, waypoint_reached_index, patrol_completed_triggered, patrol_interrupted_reason
+                
+                triggered = scheduled_patrol_triggered
                 if triggered:
-                    m.scheduled_patrol_triggered = False
+                    scheduled_patrol_triggered = False
 
-                reached_idx = m.waypoint_reached_index
+                reached_idx = waypoint_reached_index
                 if reached_idx > 0:
-                    m.waypoint_reached_index = 0
+                    waypoint_reached_index = 0
 
-                completed_triggered = m.patrol_completed_triggered
+                completed_triggered = patrol_completed_triggered
                 if completed_triggered:
-                    m.patrol_completed_triggered = False
+                    patrol_completed_triggered = False
 
-                interrupted_reason = m.patrol_interrupted_reason
+                interrupted_reason = patrol_interrupted_reason
                 if interrupted_reason:
-                    m.patrol_interrupted_reason = ""
+                    patrol_interrupted_reason = ""
 
                 # 按需动态订阅/解绑 /map 话题以节省建图以外的计算开销
                 if (slam_running or explore_running):
@@ -164,9 +193,77 @@ async def broadcast_status_loop():
                     "waypoint_reached": reached_idx,
                     "patrol_completed": completed_triggered,
                     "patrol_interrupted": interrupted_reason,
-                    "realtime_map": status_dict["realtime_map"]
+                    "realtime_map": status_dict["realtime_map"],
+                    "system_logs": system_logs
                 }
                 await manager.broadcast(status_data)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.exception("Exception in status broadcast loop")
         await asyncio.sleep(0.1) # 10Hz 频率广播
+
+# 模块属性拦截代理 (黑魔法向下兼容)
+class ManagerModule(sys.modules[__name__].__class__):
+    @property
+    def slam_process(self):
+        return process_manager.get_process("slam")
+    @slam_process.setter
+    def slam_process(self, val):
+        process_manager.set_process("slam", val)
+
+    @property
+    def explore_process(self):
+        return process_manager.get_process("explore")
+    @explore_process.setter
+    def explore_process(self, val):
+        process_manager.set_process("explore", val)
+
+    @property
+    def loc_process(self):
+        return process_manager.get_process("localization")
+    @loc_process.setter
+    def loc_process(self, val):
+        process_manager.set_process("localization", val)
+
+    @property
+    def nav2_process(self):
+        return process_manager.get_process("nav2")
+    @nav2_process.setter
+    def nav2_process(self, val):
+        process_manager.set_process("nav2", val)
+
+    @property
+    def sim_process(self):
+        return process_manager.get_process("sim")
+    @sim_process.setter
+    def sim_process(self, val):
+        process_manager.set_process("sim", val)
+
+    @property
+    def agent_process(self):
+        return process_manager.get_process("agent")
+    @agent_process.setter
+    def agent_process(self, val):
+        process_manager.set_process("agent", val)
+
+    @property
+    def base_process(self):
+        return process_manager.get_process("base")
+    @base_process.setter
+    def base_process(self, val):
+        process_manager.set_process("base", val)
+
+    @property
+    def lidar_process(self):
+        return process_manager.get_process("lidar")
+    @lidar_process.setter
+    def lidar_process(self, val):
+        process_manager.set_process("lidar", val)
+
+    @property
+    def joy_process(self):
+        return process_manager.get_process("joy")
+    @joy_process.setter
+    def joy_process(self, val):
+        process_manager.set_process("joy", val)
+
+sys.modules[__name__].__class__ = ManagerModule

@@ -8,18 +8,82 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .config import static_dir
+from contextlib import asynccontextmanager
+
+from .config import static_dir, __version__
 from .scheduler import PatrolScheduler
 from . import ros_node as rn
 from . import manager as m
 from .routes import system, robot, sim, agent, patrol, nav, slam, explore, maps
 
-app = FastAPI(title="RDK Robot API Service", version="3.0.0")
+async def auto_detect_hardware_loop():
+    """实机下位机物理串口检测与底层驱动自启动协程"""
+    import asyncio
+    import platform
+    import os
+    import logging
+    from .routes.robot import init_real_robot_hardware
+    from .models import HardwareInitPayload
+    from .config import robot_config
+    from .utils import check_docker_container
+    
+    # 1. 硬件平台环境过滤：PC端开发电脑直接禁用
+    machine = platform.machine().lower()
+    is_arm = "arm" in machine or "aarch64" in machine
+    if not is_arm:
+        logging.info("[AutoStart] PC environment detected (non-ARM). Auto hardware initialization disabled.")
+        return
+        
+    logging.info("[AutoStart] ARM embedded host detected. Auto hardware detect loop started.")
+    
+    while True:
+        await asyncio.sleep(3.0)
+        
+        # 2. 读取配置文件中指定的目标串口设备名
+        agent_cfg = robot_config.get("agent", {})
+        target_port = agent_cfg.get("serial_port", "/dev/ttyACM0")
+        
+        # 3. 精确检测目标物理串口文件是否存在
+        port_exists = os.path.exists(target_port)
+        
+        if port_exists and not getattr(m, "hardware_manually_stopped", False):
+            # 4. 判断硬件驱动是否未启动完整
+            agent_running = check_docker_container("microros_agent") or ((m.agent_process is not None) and (m.agent_process.poll() is None))
+            base_running = (m.base_process is not None) and (m.base_process.poll() is None)
+            lidar_running = (m.lidar_process is not None) and (m.lidar_process.poll() is None)
+            
+            if not (agent_running and base_running and lidar_running):
+                logging.info(f"[AutoStart] Detected port {target_port} but hardware drivers not running. Auto-initializing real robot hardware...")
+                m.add_system_log("INFO", f"检测到下位机串口 {target_port}，已自动触发实机底层硬件初始化")
+                try:
+                    init_real_robot_hardware(HardwareInitPayload())
+                except Exception as e:
+                    logging.error(f"[AutoStart] Auto hardware initialization failed: {e}")
+                    m.add_system_log("ERROR", f"自动触发实机底层硬件初始化失败: {e}")
 
-# 启用 CORS 跨域请求
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: 启动状态推送协程
+    asyncio.create_task(m.broadcast_status_loop())
+    # 启动实机下位机自动检测初始化协程
+    asyncio.create_task(auto_detect_hardware_loop())
+    yield
+
+app = FastAPI(title="RDK Robot API Service", version=__version__, lifespan=lifespan)
+
+# 启用 CORS 跨域请求（安全加固，仅限本地及局域网段）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.*",
+        "http://10.*",
+        "http://172.16.*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,9 +114,7 @@ app.include_router(slam.router)
 app.include_router(explore.router)
 app.include_router(maps.router)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(m.broadcast_status_loop())
+
 
 def ros2_thread_entry():
     rclpy.init()

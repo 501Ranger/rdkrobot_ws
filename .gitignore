@@ -41,3 +41,6 @@ CLAUDE.md
 .claude
 .antigravitycli
 AGENTS.md
+
+# Deploy configuration
+.deploy_config

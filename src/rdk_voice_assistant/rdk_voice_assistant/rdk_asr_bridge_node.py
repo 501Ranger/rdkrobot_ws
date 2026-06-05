@@ -7,7 +7,7 @@ from std_msgs.msg import String
 
 
 class RdkAsrBridgeNode(Node):
-    """Bridge RDK official ASR text into the assistant command interface."""
+    """Bridge RDK official ASR text into the assistant command interface and publish status updates."""
 
     def __init__(self) -> None:
         super().__init__('rdk_asr_bridge_node')
@@ -30,6 +30,11 @@ class RdkAsrBridgeNode(Node):
         self.partial_pub = self.create_publisher(
             String,
             str(self.get_parameter('partial_text_topic').value),
+            10,
+        )
+        self.status_pub = self.create_publisher(
+            String,
+            '/voice/stt_status',
             10,
         )
 
@@ -59,6 +64,7 @@ class RdkAsrBridgeNode(Node):
 
         if require_wake_word and not wake_word:
             self.get_logger().debug(f'Ignored ASR text without wake word: {text}')
+            self._publish_stt_status('ignored_no_wake_word', text)
             return
 
         if wake_word and remove_wake_word:
@@ -71,6 +77,7 @@ class RdkAsrBridgeNode(Node):
             self.partial_pub.publish(String(data=text))
 
         self.command_pub.publish(String(data=text))
+        self._publish_stt_status('final_text', text)
         self.get_logger().info(f'ASR bridge text: {text}')
 
     def _extract_text(self, data: str) -> str:
@@ -93,6 +100,20 @@ class RdkAsrBridgeNode(Node):
             if word in text:
                 return word
         return None
+
+    def _publish_stt_status(self, status: str, detail: str = '') -> None:
+        try:
+            payload = {
+                'status': status,
+                'detail': detail,
+                'rms': 0.0,
+                'threshold': 0.0,
+                'wake_active': True,
+                'tts_active': False
+            }
+            self.status_pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        except Exception as e:
+            self.get_logger().error(f'Failed to publish STT status: {e}')
 
     @staticmethod
     def _normalize_text(text: str) -> str:

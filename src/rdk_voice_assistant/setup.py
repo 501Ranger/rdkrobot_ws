@@ -17,7 +17,7 @@ setup(
         (os.path.join('share', package_name, 'launch'),
             glob(os.path.join('launch', '*launch.py'))),
         (os.path.join('share', package_name, 'config'),
-            glob(os.path.join('config', '*.yaml'))),
+            glob(os.path.join('config', '*.yaml')) + glob(os.path.join('config', '*.json'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -34,6 +34,9 @@ setup(
             'local_stt_node = rdk_voice_assistant.local_stt_node:main',
             'local_tts_node = rdk_voice_assistant.local_tts_node:main',
             'llm_dialog_node = rdk_voice_assistant.llm_dialog_node:main',
+            'web_dialog_node = rdk_voice_assistant.web_dialog_node:main',
+            'sound_source_localization_node = rdk_voice_assistant.sound_source_localization_node:main',
+            'check_voice_runtime = rdk_voice_assistant.check_voice_runtime:main',
         ],
     },
 )

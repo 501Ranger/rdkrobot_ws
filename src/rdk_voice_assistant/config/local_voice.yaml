@@ -4,24 +4,66 @@ local_stt_node:
     partial_text_topic: /voice/partial_text
     model_path: ''
     sample_rate: 16000
-    block_size: 8000
+    block_size: 2000
     device: ''
     language: zh-cn
-    publish_partial: false
+    publish_partial: true
     require_wake_word: true
-    wake_words: 小智,小智小智,机器人
+    wake_words: 小智,小智小智,小志,小致,小治,小直,小知,晓智,小只,小枝,小支,小汁,肖智,机器人
     remove_wake_word: true
+    noise_threshold: 150
+    silence_timeout_sec: 0.8
+    wake_window_sec: 10.0
+    tts_guard_sec: 1.2
+    calibration_chunks: 12
+    vad_threshold_scale: 1.35
+    min_utterance_sec: 0.35
+    max_speech_sec: 8.0
+    command_cooldown_sec: 0.7
+    duplicate_window_sec: 2.5
+    max_audio_queue_chunks: 80
+    min_text_length: 2
+    bypass_words: '开,关,停,去,走'
+    # Sherpa-ONNX SenseVoice ASR configurations (offline high-accuracy)
+    asr_engine: 'sherpa-onnx'
+    sherpa_onnx_asr_model: '/home/linrain/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
+    sherpa_onnx_asr_tokens: '/home/linrain/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
+    sherpa_onnx_asr_num_threads: 2
+    sherpa_onnx_streaming_encoder: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/encoder-epoch-99-avg-1.int8.onnx'
+    sherpa_onnx_streaming_decoder: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/decoder-epoch-99-avg-1.int8.onnx'
+    sherpa_onnx_streaming_joiner: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx'
+    sherpa_onnx_streaming_tokens: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt'
 
 local_tts_node:
   ros__parameters:
     reply_text_topic: /assistant/reply_text
-    engine: pyttsx3
+    engine: 'sherpa-onnx'
     rate: 170
-    volume: 1.0
-    voice: ''
+    volume: 1.2
+    voice: 'zh-CN-XiaoshuangNeural'
     language: zh
     espeak_executable: espeak-ng
     piper_executable: piper
     piper_model_path: ''
     audio_player: aplay
     print_text: true
+    # Sherpa-ONNX VITS offline engine configuration
+    sherpa_onnx_model: '/home/linrain/vits-zh-aishell3/vits-aishell3.onnx'
+    sherpa_onnx_lexicon: '/home/linrain/vits-zh-aishell3/lexicon.txt'
+    sherpa_onnx_tokens: '/home/linrain/vits-zh-aishell3/tokens.txt'
+    sherpa_onnx_data_dir: ''
+    sherpa_onnx_speaker_id: 115
+    sherpa_onnx_speed: 0.85
+    sherpa_onnx_noise_scale: 0.667
+    sherpa_onnx_noise_scale_w: 0.8
+    sherpa_onnx_tts_num_threads: 2
+    tts_cache_dir: '/home/linrain/.ros/rdk_voice_assistant/tts_cache'
+    max_cache_text_length: 15
+
+
+sound_source_localization_node:
+  ros__parameters:
+    simulation_mode: true
+    serial_port: /dev/ttyUSB0
+    baud_rate: 115200
+    default_confidence: 0.9

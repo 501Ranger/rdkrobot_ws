@@ -1,3 +1,7 @@
 vosk
 sounddevice
 pyttsx3
+numpy
+sherpa-onnx
+aiohttp
+edge-tts

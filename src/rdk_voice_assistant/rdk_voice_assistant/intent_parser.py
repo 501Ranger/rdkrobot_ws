@@ -30,6 +30,8 @@ PATROL_KEYWORDS = ('巡查', '巡视', '巡逻', '检查一圈', '看一圈')
 STATUS_KEYWORDS = ('状态', '在哪里', '在哪', '电量', '位置')
 GO_VERBS = ('去', '到', '前往', '移动', '过去', '看看', '检查')
 HOME_KEYWORDS = ('回家', '回起点', '回原点', '回充电桩', '返回起点')
+LOOK_AT_SOUND_KEYWORDS = ('看向声音方向', '看向声音', '转到声源', '转弯声源', '看向声源', '转到声音', '看声音')
+SOUND_LOCALIZATION_KEYWORDS = ('开启声源定位', '声源定位', '打开声源定位', '开启声音定位', '声音定位')
 
 
 def parse_intent(
@@ -41,6 +43,12 @@ def parse_intent(
 
     if not cleaned:
         return Intent(name='empty', raw_text=text, confidence=0.0)
+
+    if _contains_any(cleaned, LOOK_AT_SOUND_KEYWORDS):
+        return Intent(name='look_at_sound', raw_text=text)
+
+    if _contains_any(cleaned, SOUND_LOCALIZATION_KEYWORDS):
+        return Intent(name='sound_localization', raw_text=text)
 
     if _contains_any(cleaned, STOP_KEYWORDS):
         return Intent(name='stop', raw_text=text)

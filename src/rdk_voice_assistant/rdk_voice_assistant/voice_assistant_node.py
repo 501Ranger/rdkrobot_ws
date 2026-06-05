@@ -1,11 +1,14 @@
 import json
 import math
 import os
+import time
+import threading
 from typing import Dict, Optional
 
 import rclpy
 import yaml
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Twist
+from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -57,12 +60,33 @@ class VoiceAssistantNode(Node):
         self.reply_pub = self.create_publisher(String, self.reply_text_topic, 10)
         self.robot_task_pub = self.create_publisher(String, self.robot_task_topic, 10)
         self.safety_pub = self.create_publisher(String, self.safety_command_topic, 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.nav_client = ActionClient(self, NavigateToPose, self.navigate_action_name)
+
+        # Cache variables for Sound Source Localization
+        self.last_source_angle: Optional[float] = None
+        self.last_source_confidence: Optional[float] = None
+        self.last_source_time: float = 0.0
+        self.current_yaw: float = 0.0
 
         self.create_subscription(
             String,
             self.command_text_topic,
             self._on_command_text,
+            10,
+        )
+
+        self.create_subscription(
+            String,
+            '/voice/source_event',
+            self._on_source_event,
+            10,
+        )
+
+        self.create_subscription(
+            Odometry,
+            '/odom',
+            self._on_odom,
             10,
         )
 
@@ -81,6 +105,10 @@ class VoiceAssistantNode(Node):
         elif intent.name == 'start_patrol':
             self._publish_task({'task': 'start_patrol', 'source': 'voice'})
             self._say('好的，我开始巡查。')
+        elif intent.name == 'look_at_sound':
+            self._handle_look_at_sound()
+        elif intent.name == 'sound_localization':
+            self._handle_sound_localization()
         elif intent.name == 'stop':
             self._publish_safety_command('stop')
             self._say('好的，我已经发送停止指令。')
@@ -210,6 +238,102 @@ class VoiceAssistantNode(Node):
     def _publish_json(pub, payload: Dict[str, object]) -> None:
         pub.publish(String(data=json.dumps(payload, ensure_ascii=False)))
 
+    def _on_source_event(self, msg: String) -> None:
+        try:
+            data = json.loads(msg.data)
+            self.last_source_angle = float(data['angle_deg'])
+            self.last_source_confidence = float(data['confidence'])
+            self.last_source_time = float(data.get('timestamp', time.time()))
+            self.get_logger().info(f"Cached last sound source angle: {self.last_source_angle:.1f}°")
+        except Exception as e:
+            self.get_logger().error(f"Failed to parse source event: {e}")
+
+    def _handle_look_at_sound(self) -> None:
+        if self.last_source_angle is None:
+            self._say("我还没有检测到声音的方向。")
+            return
+
+        # Check if the cached sound event is too old (e.g. older than 30 seconds)
+        if time.time() - self.last_source_time > 30.0:
+            self._say("之前的声源记录已经过期，请重新发出声音。")
+            return
+
+        self._say(f"正在看向声音方向，角度是 {self.last_source_angle:.1f} 度。")
+        self._publish_task({
+            'task': 'look_at_sound',
+            'source': 'voice',
+            'angle_deg': self.last_source_angle,
+            'confidence': self.last_source_confidence
+        })
+
+        # Execute base rotation fallback
+        self._rotate_to_angle(self.last_source_angle)
+
+    def _handle_sound_localization(self) -> None:
+        self._say("好的，声源定位功能已开启。")
+        self._publish_task({
+            'task': 'sound_localization',
+            'source': 'voice',
+            'active': True
+        })
+
+    def _on_odom(self, msg: Odometry) -> None:
+        q = msg.pose.pose.orientation
+        # Convert quaternion to yaw angle
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    def _rotate_to_angle(self, angle_deg: float) -> None:
+        # Calculate target absolute yaw based on current yaw and relative source angle
+        yaw_rel = math.radians(angle_deg)
+        target_yaw = self.current_yaw + yaw_rel
+        # Normalize target yaw to [-pi, pi]
+        target_yaw = (target_yaw + math.pi) % (2.0 * math.pi) - math.pi
+
+        self.get_logger().info(
+            f"Rotating towards sound: target yaw {math.degrees(target_yaw):.1f}° "
+            f"(relative {angle_deg:.1f}°, current {math.degrees(self.current_yaw):.1f}°)"
+        )
+
+        def run():
+            pub = self.cmd_vel_pub
+            twist = Twist()
+            # Sleep a tiny bit to let the TTS finish speaking or avoid conflicts
+            time.sleep(0.5)
+            
+            kp = 0.8        # Proportional gain for yaw rotation
+            max_speed = 0.6 # Maximum angular speed (rad/s)
+            min_speed = 0.15# Minimum angular speed to overcome static friction (rad/s)
+            tolerance = 0.03# Tolerance range (~1.7 degrees)
+            
+            while rclpy.ok():
+                # Calculate shortest angular error
+                error = target_yaw - self.current_yaw
+                error = (error + math.pi) % (2.0 * math.pi) - math.pi
+                
+                if abs(error) < tolerance:
+                    break
+                    
+                # Proportional speed calculation
+                speed = kp * error
+                # Limit speed range
+                if speed > 0:
+                    speed = max(min_speed, min(max_speed, speed))
+                else:
+                    speed = min(-min_speed, max(-max_speed, speed))
+                    
+                twist.angular.z = speed
+                pub.publish(twist)
+                time.sleep(0.05)
+            
+            # Stop rotation
+            twist.angular.z = 0.0
+            pub.publish(twist)
+            self.get_logger().info("Closed-loop rotation to sound completed.")
+
+        threading.Thread(target=run, daemon=True).start()
+
 
 def main(args: Optional[list] = None) -> None:
     rclpy.init(args=args)
@@ -218,7 +342,10 @@ def main(args: Optional[list] = None) -> None:
         rclpy.spin(node)
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

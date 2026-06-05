@@ -6,6 +6,7 @@ import threading
 from typing import Dict, Optional
 
 import rclpy
+import tf2_ros
 import yaml
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
@@ -33,6 +34,7 @@ class VoiceAssistantNode(Node):
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('places_file', '')
         self.declare_parameter('chat_fallback_reply', True)
+        self.declare_parameter('base_frame', 'base_link')
 
         self.command_text_topic = self.get_parameter(
             'command_text_topic').get_parameter_value().string_value
@@ -52,6 +54,8 @@ class VoiceAssistantNode(Node):
             'chat_fallback_reply').get_parameter_value().bool_value
         self.map_frame = self.get_parameter(
             'map_frame').get_parameter_value().string_value
+        self.base_frame = self.get_parameter(
+            'base_frame').get_parameter_value().string_value
 
         self.places = self._load_places()
         self.place_aliases = self._build_place_aliases()
@@ -68,6 +72,11 @@ class VoiceAssistantNode(Node):
         self.last_source_confidence: Optional[float] = None
         self.last_source_time: float = 0.0
         self.current_yaw: float = 0.0
+        self.last_odom_pose: Optional[object] = None
+
+        # TF Listener
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.create_subscription(
             String,
@@ -109,6 +118,8 @@ class VoiceAssistantNode(Node):
             self._handle_look_at_sound()
         elif intent.name == 'sound_localization':
             self._handle_sound_localization()
+        elif intent.name == 'record_place':
+            self._handle_record_place(intent)
         elif intent.name == 'stop':
             self._publish_safety_command('stop')
             self._say('好的，我已经发送停止指令。')
@@ -278,6 +289,7 @@ class VoiceAssistantNode(Node):
         })
 
     def _on_odom(self, msg: Odometry) -> None:
+        self.last_odom_pose = msg.pose.pose
         q = msg.pose.pose.orientation
         # Convert quaternion to yaw angle
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
@@ -333,6 +345,122 @@ class VoiceAssistantNode(Node):
             self.get_logger().info("Closed-loop rotation to sound completed.")
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _handle_record_place(self, intent: Intent) -> None:
+        display_name = intent.place
+        if not display_name:
+            self._say("未识别到地点的名称。")
+            return
+
+        x, y, yaw = None, None, None
+        used_odom = False
+
+        # 1. Try to get transform from map to base_frame using TF
+        try:
+            now = rclpy.time.Time()
+            trans = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.base_frame,
+                now,
+                timeout=rclpy.duration.Duration(seconds=1.0)
+            )
+            x = trans.transform.translation.x
+            y = trans.transform.translation.y
+            q = trans.transform.rotation
+            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            yaw = math.atan2(siny_cosp, cosy_cosp)
+            self.get_logger().info(f"Retrieved robot pose via TF ({self.map_frame} -> {self.base_frame}): x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}")
+        except Exception as e:
+            self.get_logger().warn(f"TF lookup failed: {e}. Falling back to last received /odom...")
+
+        # 2. If TF fails, try fallback to odom message cache
+        if x is None and self.last_odom_pose is not None:
+            pos = self.last_odom_pose.position
+            x = pos.x
+            y = pos.y
+            q = self.last_odom_pose.orientation
+            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            yaw = math.atan2(siny_cosp, cosy_cosp)
+            used_odom = True
+            self.get_logger().info(f"Retrieved robot pose via /odom callback: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}")
+
+        # 3. If both failed
+        if x is None:
+            self._say("无法获取定位坐标，请确认导航系统或里程计已正常启动。")
+            return
+
+        # 4. Save to YAML
+        success = self._save_place(display_name, x, y, yaw)
+        if success:
+            if used_odom:
+                self._say(f"定位系统未就绪，已使用里程计坐标将当前位置记录为{display_name}。")
+            else:
+                self._say(f"好的，我已经把当前位置记录为{display_name}。")
+        else:
+            self._say("保存位置文件失败，请检查文件写入权限。")
+
+    def _save_place(self, display_name: str, x: float, y: float, yaw: float) -> bool:
+        places_file = self.get_parameter('places_file').get_parameter_value().string_value
+        if not places_file:
+            self.get_logger().error("places_file parameter is empty, cannot save location.")
+            return False
+
+        try:
+            # Ensure the directory exists
+            dir_path = os.path.dirname(places_file)
+            if dir_path and not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+
+            data = {}
+            if os.path.exists(places_file):
+                with open(places_file, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f) or {}
+
+            if 'places' not in data:
+                data['places'] = {}
+
+            places = data['places']
+
+            # Find if this place already exists (by name or aliases match)
+            existing_key = None
+            for key, info in places.items():
+                if info.get('name') == display_name or display_name in info.get('aliases', []):
+                    existing_key = key
+                    break
+
+            if existing_key:
+                places[existing_key]['x'] = round(float(x), 3)
+                places[existing_key]['y'] = round(float(y), 3)
+                places[existing_key]['yaw'] = round(float(yaw), 3)
+                self.get_logger().info(f"Updated existing place '{existing_key}' (name: '{display_name}') in places.yaml.")
+            else:
+                # Find a unique key
+                key_idx = 1
+                while f"place_{key_idx}" in places:
+                    key_idx += 1
+                new_key = f"place_{key_idx}"
+                places[new_key] = {
+                    'name': display_name,
+                    'aliases': [],
+                    'x': round(float(x), 3),
+                    'y': round(float(y), 3),
+                    'yaw': round(float(yaw), 3)
+                }
+                self.get_logger().info(f"Created new place '{new_key}' (name: '{display_name}') in places.yaml.")
+
+            # Write back
+            with open(places_file, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(data, f, allow_unicode=True, default_flow_style=False)
+
+            # Refresh internal lookups
+            self.places = self._load_places()
+            self.place_aliases = self._build_place_aliases()
+            return True
+        except Exception as e:
+            self.get_logger().error(f"Error saving place to file {places_file}: {e}")
+            return False
 
 
 def main(args: Optional[list] = None) -> None:

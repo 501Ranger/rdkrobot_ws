@@ -25,6 +25,7 @@ DEFAULT_PLACE_ALIASES: Dict[str, str] = {
 }
 
 
+RECORD_KEYWORDS = ('记录当前位置为', '把当前位置记作', '把当前位置设置为', '记录当前位置作', '设置当前位置为', '当前位置记为', '当前位置设置为')
 STOP_KEYWORDS = ('停止', '停下', '别动', '不要动', '急停', '刹车', '暂停')
 PATROL_KEYWORDS = ('巡查', '巡视', '巡逻', '检查一圈', '看一圈')
 STATUS_KEYWORDS = ('状态', '在哪里', '在哪', '电量', '位置')
@@ -43,6 +44,14 @@ def parse_intent(
 
     if not cleaned:
         return Intent(name='empty', raw_text=text, confidence=0.0)
+
+    for kw in RECORD_KEYWORDS:
+        if kw in cleaned:
+            parts = cleaned.split(kw)
+            if len(parts) > 1:
+                place_name = parts[1].strip()
+                if place_name:
+                    return Intent(name='record_place', raw_text=text, place=place_name)
 
     if _contains_any(cleaned, LOOK_AT_SOUND_KEYWORDS):
         return Intent(name='look_at_sound', raw_text=text)

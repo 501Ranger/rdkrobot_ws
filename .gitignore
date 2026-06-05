@@ -1,7 +1,10 @@
 # ROS2 / colcon workspace
 build/
+build_arm64/
 install/
+install_arm64/
 log/
+maps/
 
 # Python
 __pycache__/
@@ -33,9 +36,15 @@ install_manifest.txt
 *.swp
 *~
 .DS_Store
+CLAUDE.md
 .codex
-
 # Local secrets
 .env
 .env.*
 src/rdk_voice_assistant/config/llm_dialog.yaml
+.claude
+.antigravitycli
+AGENTS.md
+
+# Deploy configuration
+.deploy_config

@@ -30,8 +30,6 @@ int main(int argc, char* argv[])
         rclcpp::spin_some(node);
   }
   //rclcpp::spin(node);
-  if (rclcpp::ok()) {
-    rclcpp::shutdown();
-  }
+  rclcpp::shutdown();
   return 0;
 }

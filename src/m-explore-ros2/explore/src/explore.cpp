@@ -41,13 +41,12 @@
 #include <thread>
 
 inline static bool same_point(const geometry_msgs::msg::Point& one,
-                              const geometry_msgs::msg::Point& two,
-                              const double aliasing_distance)
+                              const geometry_msgs::msg::Point& two)
 {
   double dx = one.x - two.x;
   double dy = one.y - two.y;
   double dist = sqrt(dx * dx + dy * dy);
-  return dist < aliasing_distance;
+  return dist < 0.01;
 }
 
 namespace explore
@@ -70,7 +69,6 @@ Explore::Explore()
   this->declare_parameter<float>("orientation_scale", 0.0);
   this->declare_parameter<float>("gain_scale", 1.0);
   this->declare_parameter<float>("min_frontier_size", 0.5);
-  this->declare_parameter<float>("goal_aliasing_distance", 0.20);
   this->declare_parameter<bool>("return_to_init", false);
 
   this->get_parameter("planner_frequency", planner_frequency_);
@@ -80,16 +78,8 @@ Explore::Explore()
   this->get_parameter("orientation_scale", orientation_scale_);
   this->get_parameter("gain_scale", gain_scale_);
   this->get_parameter("min_frontier_size", min_frontier_size);
-  this->get_parameter("goal_aliasing_distance", goal_aliasing_distance_);
   this->get_parameter("return_to_init", return_to_init_);
   this->get_parameter("robot_base_frame", robot_base_frame_);
-
-  if (goal_aliasing_distance_ < 0.0) {
-    RCLCPP_WARN(logger_,
-                "goal_aliasing_distance is negative (%.3f), clamping to 0.0",
-                goal_aliasing_distance_);
-    goal_aliasing_distance_ = 0.0;
-  }
 
   progress_timeout_ = timeout;
   move_base_client_ =
@@ -278,8 +268,7 @@ void Explore::makePlan()
   geometry_msgs::msg::Point target_position = frontier->centroid;
 
   // time out if we are not making any progress
-  bool same_goal =
-      same_point(prev_goal_, target_position, goal_aliasing_distance_);
+  bool same_goal = same_point(prev_goal_, target_position);
 
   prev_goal_ = target_position;
   if (!same_goal || prev_distance_ > frontier->min_distance) {

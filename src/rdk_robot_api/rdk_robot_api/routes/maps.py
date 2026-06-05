@@ -231,7 +231,7 @@ class MapEditPayload(BaseModel):
     image_base64: str
 
 @router.post("/{map_name}/edit")
-def edit_map_file(map_name: str, payload: MapEditPayload):
+async def edit_map_file(map_name: str, payload: MapEditPayload):
     """接收前端 Canvas 涂鸦后的 RGBA 图像，转换为 ROS 8位单通道 PGM 灰度图，并覆盖写入原地图文件"""
     import base64
     import numpy as np
@@ -296,4 +296,4 @@ def edit_map_file(map_name: str, payload: MapEditPayload):
         raise HTTPException(status_code=500, detail=f"Failed to process and save PGM map: {e}")
         
     # 5. 自动重载该地图到导航中
-    return load_map_into_navigation(map_name)
+    return await load_map_into_navigation(map_name)

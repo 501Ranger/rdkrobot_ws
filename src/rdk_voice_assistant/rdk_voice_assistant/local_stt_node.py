@@ -596,6 +596,52 @@ class LocalSttNode(Node):
             self.get_logger().error(str(exc))
             return
 
+        # 1. Parameter loading and calculations
+        model_path = str(self.get_parameter('model_path').value)
+        sample_rate = int(self.get_parameter('sample_rate').value)
+        block_size = int(self.get_parameter('block_size').value)
+        device = self._parse_device(str(self.get_parameter('device').value))
+        noise_threshold = int(self.get_parameter('noise_threshold').value)
+        silence_timeout_sec = float(self.get_parameter('silence_timeout_sec').value)
+
+        block_duration = block_size / sample_rate
+        max_silent_blocks = max(1, int(silence_timeout_sec / block_duration))
+        max_speech_blocks = max(1, int(float(self.get_parameter('max_speech_sec').value) / block_duration))
+        min_speech_blocks = max(1, int(float(self.get_parameter('min_utterance_sec').value) / block_duration))
+        calibration_chunks = self._calibration_chunk_count()
+
+        # 2. Check and load Vosk model and recognizer
+        if not Path(model_path).exists():
+            self.get_logger().error(f'Vosk model not found at: {model_path}')
+            self._publish_stt_status('error', f'Vosk model not found at: {model_path}')
+            return
+
+        self.get_logger().info(f'Loading Vosk ASR model: {model_path}')
+        self._publish_stt_status('loading')
+        try:
+            model = Model(model_path)
+            recognizer = KaldiRecognizer(model, sample_rate)
+            self.get_logger().info('Vosk recognizer loaded successfully.')
+            self._publish_stt_status('ready')
+        except Exception as exc:
+            self.get_logger().error(f'Failed to initialize Vosk: {exc}')
+            self._publish_stt_status('error', '', f'Load failed: {exc}')
+            return
+
+        # 3. Initialize loop state variables to avoid UnboundLocalError
+        in_speech = False
+        silent_block_count = 0
+        speech_block_count = 0
+
+        # 4. Define audio recording callback function
+        def callback(indata, frames, time, status):
+            if status:
+                self.get_logger().warn(str(status))
+            # Vosk RawInputStream expects int16 bytes, compute RMS
+            data_np = np.frombuffer(indata, dtype=np.int16)
+            rms = np.sqrt(np.mean(data_np.astype(np.float32)**2)) if len(data_np) > 0 else 0.0
+            self._enqueue_audio((indata, rms))
+
         # Check recalibrate flag
         with self.calibration_lock:
             self.calibration_rms = []

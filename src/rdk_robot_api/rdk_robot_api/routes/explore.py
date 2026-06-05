@@ -23,7 +23,13 @@ def start_autonomous_exploration():
         install_dir = os.path.dirname(WORKSPACE_SETUP_BASH)
         explore_config = os.path.join(install_dir, 'rdk_robot_bringup', 'share', 'rdk_robot_bringup', 'config', 'explore.yaml')
         if not os.path.exists(explore_config):
-            explore_config = "/home/ranger/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/explore.yaml"
+            for user in ["linrain", "ranger"]:
+                path = f"/home/{user}/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/explore.yaml"
+                if os.path.exists(path):
+                    explore_config = path
+                    break
+        if not os.path.exists(explore_config):
+            explore_config = "/home/linrain/rdkrobot_ws/install/rdk_robot_bringup/share/rdk_robot_bringup/config/explore.yaml"
 
     cmd = [
         "bash", "-c",

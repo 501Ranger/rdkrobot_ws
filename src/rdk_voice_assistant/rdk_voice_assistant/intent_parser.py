@@ -33,6 +33,7 @@ GO_VERBS = ('去', '到', '前往', '移动', '过去', '看看', '检查')
 HOME_KEYWORDS = ('回家', '回起点', '回原点', '回充电桩', '返回起点')
 LOOK_AT_SOUND_KEYWORDS = ('看向声音方向', '看向声音', '转到声源', '转弯声源', '看向声源', '转到声音', '看声音')
 SOUND_LOCALIZATION_KEYWORDS = ('开启声源定位', '声源定位', '打开声源定位', '开启声音定位', '声音定位')
+COME_HERE_KEYWORDS = ('过来', '来我这', '到我这', '到我这边', '来我这边', '靠近我')
 
 
 def parse_intent(
@@ -44,6 +45,9 @@ def parse_intent(
 
     if not cleaned:
         return Intent(name='empty', raw_text=text, confidence=0.0)
+
+    if _contains_any(cleaned, COME_HERE_KEYWORDS):
+        return Intent(name='come_here', raw_text=text)
 
     for kw in RECORD_KEYWORDS:
         if kw in cleaned:

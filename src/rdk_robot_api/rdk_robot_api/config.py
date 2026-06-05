@@ -37,7 +37,14 @@ if not WORKSPACE_SETUP_BASH:
         WORKSPACE_SETUP_BASH = setup_path
 
 if not WORKSPACE_SETUP_BASH:
-    WORKSPACE_SETUP_BASH = "/home/ranger/rdkrobot_ws/install/setup.bash"
+    for user in ["linrain", "ranger"]:
+        path = f"/home/{user}/rdkrobot_ws/install/setup.bash"
+        if os.path.exists(path):
+            WORKSPACE_SETUP_BASH = path
+            break
+
+if not WORKSPACE_SETUP_BASH:
+    WORKSPACE_SETUP_BASH = "/home/linrain/rdkrobot_ws/install/setup.bash"
 
 # 加载统一配置 robot_params.yaml
 robot_config = {}
@@ -49,7 +56,13 @@ except Exception:
     src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     config_path = os.path.join(src_dir, 'src', 'rdk_robot_api', 'config', 'robot_params.yaml')
     if not os.path.exists(config_path):
-        config_path = "/home/ranger/rdkrobot_ws/src/rdk_robot_api/config/robot_params.yaml"
+        for user in ["linrain", "ranger"]:
+            path = f"/home/{user}/rdkrobot_ws/src/rdk_robot_api/config/robot_params.yaml"
+            if os.path.exists(path):
+                config_path = path
+                break
+    if not os.path.exists(config_path):
+        config_path = "/home/linrain/rdkrobot_ws/src/rdk_robot_api/config/robot_params.yaml"
 
 if os.path.exists(config_path):
     try:

@@ -10,6 +10,7 @@ import tf2_ros
 import yaml
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -74,9 +75,21 @@ class VoiceAssistantNode(Node):
         self.current_yaw: float = 0.0
         self.last_odom_pose: Optional[object] = None
 
+        # Cache variables for Lidar scan and cooperative movement cancellation
+        self.last_scan: Optional[LaserScan] = None
+        self.last_scan_time: float = 0.0
+        self.current_movement_id: int = 0
+
         # TF Listener
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
+        self.create_subscription(
+            LaserScan,
+            '/scan',
+            self._on_scan,
+            10,
+        )
 
         self.create_subscription(
             String,
@@ -139,9 +152,14 @@ class VoiceAssistantNode(Node):
             self._handle_look_at_sound()
         elif intent.name == 'sound_localization':
             self._handle_sound_localization()
+        elif intent.name == 'come_here':
+            self._handle_come_here()
         elif intent.name == 'record_place':
             self._handle_record_place(intent)
         elif intent.name == 'stop':
+            self.current_movement_id += 1
+            stop_twist = Twist()
+            self.cmd_vel_pub.publish(stop_twist)
             self._publish_safety_command('stop')
             self._say('好的，我已经发送停止指令。')
         elif intent.name == 'status':
@@ -298,8 +316,12 @@ class VoiceAssistantNode(Node):
             'confidence': self.last_source_confidence
         })
 
+        # Cancel previous movements by incrementing ID
+        self.current_movement_id += 1
+        my_id = self.current_movement_id
+
         # Execute base rotation fallback
-        self._rotate_to_angle(self.last_source_angle)
+        self._rotate_to_angle(self.last_source_angle, my_id)
 
     def _handle_sound_localization(self) -> None:
         self._say("好的，声源定位功能已开启。")
@@ -317,7 +339,37 @@ class VoiceAssistantNode(Node):
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
 
-    def _rotate_to_angle(self, angle_deg: float) -> None:
+    def _on_scan(self, msg: LaserScan) -> None:
+        self.last_scan = msg
+        self.last_scan_time = time.time()
+
+    def _get_front_distance(self) -> float:
+        if self.last_scan is None:
+            return float('inf')
+        if time.time() - self.last_scan_time > 2.0:
+            return float('inf')
+
+        scan = self.last_scan
+        angle_min = scan.angle_min
+        angle_increment = scan.angle_increment
+        ranges = scan.ranges
+
+        valid_ranges = []
+        for i, dist in enumerate(ranges):
+            angle = angle_min + i * angle_increment
+            # Normalize angle to [-pi, pi]
+            angle = (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+            # Check if within +-15 degrees cone in front
+            if abs(angle) <= math.radians(15.0):
+                if math.isfinite(dist) and dist > 0.05:
+                    valid_ranges.append(dist)
+
+        if not valid_ranges:
+            return float('inf')
+        return min(valid_ranges)
+
+    def _rotate_to_angle(self, angle_deg: float, my_id: int) -> None:
         # Calculate target absolute yaw based on current yaw and relative source angle
         yaw_rel = math.radians(angle_deg)
         target_yaw = self.current_yaw + yaw_rel
@@ -341,6 +393,10 @@ class VoiceAssistantNode(Node):
             tolerance = 0.03# Tolerance range (~1.7 degrees)
             
             while rclpy.ok():
+                if self.current_movement_id != my_id:
+                    self.get_logger().info(f"Rotation ID {my_id} cancelled.")
+                    return
+
                 # Calculate shortest angular error
                 error = target_yaw - self.current_yaw
                 error = (error + math.pi) % (2.0 * math.pi) - math.pi
@@ -366,6 +422,133 @@ class VoiceAssistantNode(Node):
             self.get_logger().info("Closed-loop rotation to sound completed.")
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _handle_come_here(self) -> None:
+        if self.last_source_angle is None:
+            self._say("我还没有检测到声音的方向。请对我说话。")
+            return
+        if time.time() - self.last_source_time > 30.0:
+            self._say("声源方向记录已过期，请重新呼唤我。")
+            return
+
+        self.current_movement_id += 1
+        my_id = self.current_movement_id
+
+        self._say("收到，我这就过来。")
+        threading.Thread(
+            target=self._execute_come_here,
+            args=(my_id, self.last_source_angle),
+            daemon=True
+        ).start()
+
+    def _execute_come_here(self, my_id: int, relative_angle: float) -> None:
+        self.get_logger().info(f"Starting 'come_here' execution thread, ID={my_id}")
+        
+        # Phase 1: Rotate towards the sound source
+        yaw_rel = math.radians(relative_angle)
+        target_yaw = self.current_yaw + yaw_rel
+        target_yaw = (target_yaw + math.pi) % (2.0 * math.pi) - math.pi
+
+        self.get_logger().info(
+            f"Rotation phase: target yaw {math.degrees(target_yaw):.1f}° "
+            f"(relative {relative_angle:.1f}°, current {math.degrees(self.current_yaw):.1f}°)"
+        )
+
+        kp_yaw = 0.8        # Proportional gain for yaw rotation
+        max_yaw_speed = 0.5 # Maximum angular speed (rad/s)
+        min_yaw_speed = 0.15# Minimum angular speed to overcome static friction (rad/s)
+        yaw_tolerance = 0.05# Tolerance range (~2.8 degrees)
+        
+        pub = self.cmd_vel_pub
+        twist = Twist()
+        time.sleep(0.5)  # Wait for speech to start
+
+        while rclpy.ok():
+            if self.current_movement_id != my_id:
+                self.get_logger().info(f"Movement ID {my_id} cancelled during rotation.")
+                return
+
+            error = target_yaw - self.current_yaw
+            error = (error + math.pi) % (2.0 * math.pi) - math.pi
+
+            if abs(error) < yaw_tolerance:
+                self.get_logger().info("Rotation phase completed.")
+                break
+
+            speed = kp_yaw * error
+            if speed > 0:
+                speed = max(min_yaw_speed, min(max_yaw_speed, speed))
+            else:
+                speed = min(-min_yaw_speed, max(-max_yaw_speed, speed))
+
+            twist.angular.z = speed
+            twist.linear.x = 0.0
+            pub.publish(twist)
+            time.sleep(0.05)
+
+        # Stop rotation
+        twist.angular.z = 0.0
+        pub.publish(twist)
+        time.sleep(0.5)  # Wait to stabilize
+
+        # Phase 2: Move forward using Lidar distance
+        kp_dist = 0.4          # Proportional gain for distance
+        max_linear_speed = 0.2 # Maximum linear speed (m/s)
+        min_linear_speed = 0.08# Minimum linear speed to overcome static friction (m/s)
+        target_dist = 0.8      # Target stop distance (meters)
+        min_safety_dist = 0.35 # Stop immediately if closer than this (meters)
+        max_detect_dist = 4.0  # Max distance to consider target (meters)
+
+        self.get_logger().info("Forward phase: moving towards speaker using Lidar guidance.")
+
+        while rclpy.ok():
+            if self.current_movement_id != my_id:
+                self.get_logger().info(f"Movement ID {my_id} cancelled during forward motion.")
+                return
+
+            dist = self._get_front_distance()
+
+            # If Lidar data is missing or invalid
+            if dist == float('inf'):
+                self.get_logger().warn("Lidar distance is invalid or stale, stopping for safety.")
+                twist.linear.x = 0.0
+                pub.publish(twist)
+                time.sleep(0.2)
+                continue
+
+            # If too close (safety stop)
+            if dist < min_safety_dist:
+                self.get_logger().warn(f"Obstacle too close ({dist:.2f}m < {min_safety_dist}m), emergency stop.")
+                twist.linear.x = 0.0
+                pub.publish(twist)
+                self._say("太近了，安全停止。")
+                return
+
+            # If target distance reached
+            if dist <= target_dist:
+                self.get_logger().info(f"Target distance reached ({dist:.2f}m <= {target_dist}m). Stopping.")
+                twist.linear.x = 0.0
+                pub.publish(twist)
+                self._say("我到啦！")
+                return
+
+            # If target is too far or lost
+            if dist > max_detect_dist:
+                self.get_logger().warn(f"Target distance too far or lost ({dist:.2f}m > {max_detect_dist}m). Stopping.")
+                twist.linear.x = 0.0
+                pub.publish(twist)
+                self._say("你太远了，我找不到你。")
+                return
+
+            # Proportional velocity control
+            error_dist = dist - target_dist
+            speed = kp_dist * error_dist
+            speed = max(min_linear_speed, min(max_linear_speed, speed))
+
+            twist.linear.x = speed
+            twist.angular.z = 0.0
+            pub.publish(twist)
+            time.sleep(0.05)
 
     def _handle_record_place(self, intent: Intent) -> None:
         display_name = intent.place

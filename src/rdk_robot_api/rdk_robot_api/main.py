@@ -14,7 +14,7 @@ from .config import static_dir, __version__
 from .scheduler import PatrolScheduler
 from . import ros_node as rn
 from . import manager as m
-from .routes import system, robot, sim, agent, patrol, nav, slam, explore, maps
+from .routes import system, robot, sim, agent, patrol, nav, slam, explore, maps, voice
 
 async def auto_detect_hardware_loop():
     """实机下位机物理串口检测与底层驱动自启动协程"""
@@ -113,6 +113,7 @@ app.include_router(nav.router)
 app.include_router(slam.router)
 app.include_router(explore.router)
 app.include_router(maps.router)
+app.include_router(voice.router)
 
 
 

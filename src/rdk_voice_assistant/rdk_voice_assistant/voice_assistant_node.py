@@ -87,7 +87,21 @@ class VoiceAssistantNode(Node):
 
         self.create_subscription(
             String,
+            '/voice/api_command_text',
+            self._on_command_text,
+            10,
+        )
+
+        self.create_subscription(
+            String,
             '/voice/source_event',
+            self._on_source_event,
+            10,
+        )
+
+        self.create_subscription(
+            String,
+            '/voice/source_event_sim',
             self._on_source_event,
             10,
         )
@@ -96,6 +110,13 @@ class VoiceAssistantNode(Node):
             Odometry,
             '/odom',
             self._on_odom,
+            10,
+        )
+
+        self.create_subscription(
+            String,
+            '/voice/record_place_cmd',
+            self._on_record_place_cmd,
             10,
         )
 
@@ -401,6 +422,35 @@ class VoiceAssistantNode(Node):
         else:
             self._say("保存位置文件失败，请检查文件写入权限。")
 
+    def _on_record_place_cmd(self, msg: String) -> None:
+        try:
+            data = json.loads(msg.data)
+            display_name = data.get('name')
+            if not display_name:
+                self.get_logger().error("Record place command missing 'name' field.")
+                return
+
+            x = data.get('x')
+            y = data.get('y')
+            yaw = data.get('yaw')
+
+            # If coordinates are provided, save them directly
+            if x is not None and y is not None and yaw is not None:
+                self.get_logger().info(f"API command requested direct coordinate save for '{display_name}': x={x}, y={y}, yaw={yaw}")
+                success = self._save_place(display_name, float(x), float(y), float(yaw))
+                if success:
+                    self._say(f"好的，已更新{display_name}的坐标。")
+                else:
+                    self._say("保存位置文件失败。")
+                return
+
+            # Otherwise, perform dynamic record (query TF/Odom)
+            self.get_logger().info(f"API command requested dynamic record for '{display_name}'. Querying coordinates...")
+            intent = Intent(name='record_place', raw_text='', place=display_name)
+            self._handle_record_place(intent)
+        except Exception as e:
+            self.get_logger().error(f"Failed to process record place command: {e}")
+
     def _save_place(self, display_name: str, x: float, y: float, yaw: float) -> bool:
         places_file = self.get_parameter('places_file').get_parameter_value().string_value
         if not places_file:
@@ -450,9 +500,11 @@ class VoiceAssistantNode(Node):
                 }
                 self.get_logger().info(f"Created new place '{new_key}' (name: '{display_name}') in places.yaml.")
 
-            # Write back
-            with open(places_file, 'w', encoding='utf-8') as f:
+            # Write back atomically using temporary file + rename replacement
+            temp_file = places_file + ".tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 yaml.safe_dump(data, f, allow_unicode=True, default_flow_style=False)
+            os.replace(temp_file, places_file)
 
             # Refresh internal lookups
             self.places = self._load_places()
@@ -460,6 +512,13 @@ class VoiceAssistantNode(Node):
             return True
         except Exception as e:
             self.get_logger().error(f"Error saving place to file {places_file}: {e}")
+            # Clean up temp file if it exists
+            try:
+                temp_file = places_file + ".tmp"
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception:
+                pass
             return False
 
 

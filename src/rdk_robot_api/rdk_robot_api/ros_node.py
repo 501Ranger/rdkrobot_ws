@@ -67,6 +67,11 @@ class RobotApiNode(Node):
             PoseWithCovarianceStamped, "/initialpose", 
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         )
+        # 语音相关发布者
+        self.voice_api_command_pub = self.create_publisher(String, "/voice/api_command_text", 10)
+        self.voice_reply_pub = self.create_publisher(String, "/assistant/reply_text", 10)
+        self.voice_source_sim_pub = self.create_publisher(String, "/voice/source_event_sim", 10)
+        self.voice_record_cmd_pub = self.create_publisher(String, "/voice/record_place_cmd", 10)
 
         # 订阅者
         self.battery_sub = self.create_subscription(
@@ -83,6 +88,19 @@ class RobotApiNode(Node):
         )
         self.nav2_path_sub = self.create_subscription(
             Path, "/plan", self.nav2_path_callback, 10
+        )
+        # 语音相关订阅者
+        self.voice_command_sub = self.create_subscription(
+            String, "/voice/command_text", self.voice_command_callback, 10
+        )
+        self.voice_api_command_sub = self.create_subscription(
+            String, "/voice/api_command_text", self.voice_api_command_callback, 10
+        )
+        self.voice_reply_sub = self.create_subscription(
+            String, "/assistant/reply_text", self.voice_reply_callback, 10
+        )
+        self.voice_source_sub = self.create_subscription(
+            String, "/voice/source_event", self.voice_source_callback, 10
         )
         self.patrol_feedback_sub = self.create_subscription(
             String, "/patrol/feedback", self.patrol_feedback_callback, 10
@@ -113,6 +131,14 @@ class RobotApiNode(Node):
         self.nav2_path = []
         self.map_sub = None
         self.realtime_map_data = None
+
+        # 语音相关缓存状态
+        self.latest_command_text = ""
+        self.latest_command_source = ""
+        self.latest_tts_text = ""
+        self.latest_source_angle = 0.0
+        self.latest_source_confidence = 0.0
+        self.latest_voice_update_time = 0.0
         
         # 导航相关变量
         self.current_nav_goal_handle = None
@@ -144,7 +170,15 @@ class RobotApiNode(Node):
                 "last_odom_time": self.last_odom_time,
                 "last_amcl_time": self.last_amcl_time,
                 "realtime_map": self.realtime_map_data,
-                "joy_unlocked": self._joy_unlocked
+                "joy_unlocked": self._joy_unlocked,
+                "voice_status": {
+                    "latest_command_text": self.latest_command_text,
+                    "latest_command_source": self.latest_command_source,
+                    "latest_tts_text": self.latest_tts_text,
+                    "source_angle": self.latest_source_angle,
+                    "source_confidence": self.latest_source_confidence,
+                    "updated_at": self.latest_voice_update_time
+                }
             }
 
     def battery_callback(self, msg: BatteryState):
@@ -596,4 +630,64 @@ class RobotApiNode(Node):
             if getattr(self, "_joy_actively_controlling", False):
                 self.publish_cmd_vel(0.0, 0.0)
                 self._joy_actively_controlling = False
+
+    # 语音相关回调与接口方法
+    def voice_command_callback(self, msg: String):
+        with self._lock:
+            self.latest_command_text = msg.data
+            self.latest_command_source = "stt"
+            self.latest_voice_update_time = time.time()
+
+    def voice_api_command_callback(self, msg: String):
+        with self._lock:
+            self.latest_command_text = msg.data
+            self.latest_command_source = "api"
+            self.latest_voice_update_time = time.time()
+
+    def voice_reply_callback(self, msg: String):
+        with self._lock:
+            self.latest_tts_text = msg.data
+            self.latest_voice_update_time = time.time()
+
+    def voice_source_callback(self, msg: String):
+        import json
+        try:
+            data = json.loads(msg.data)
+            with self._lock:
+                self.latest_source_angle = float(data.get("angle_deg", 0.0))
+                self.latest_source_confidence = float(data.get("confidence", 1.0))
+                self.latest_voice_update_time = time.time()
+        except Exception:
+            pass
+
+    def publish_voice_api_command(self, text: str):
+        msg = String()
+        msg.data = text
+        self.voice_api_command_pub.publish(msg)
+        self.get_logger().info(f"Published voice API command: '{text}'")
+
+    def publish_voice_reply(self, text: str):
+        msg = String()
+        msg.data = text
+        self.voice_reply_pub.publish(msg)
+        self.get_logger().info(f"Published voice reply (TTS): '{text}'")
+
+    def publish_voice_source_sim(self, angle: float, confidence: float):
+        import json
+        payload = json.dumps({"angle_deg": angle, "confidence": confidence, "timestamp": time.time()})
+        msg = String()
+        msg.data = payload
+        self.voice_source_sim_pub.publish(msg)
+        self.get_logger().info(f"Published voice source simulation: '{payload}'")
+
+    def publish_voice_record_cmd(self, name: str, x: float = None, y: float = None, yaw: float = None):
+        import json
+        payload_dict = {"name": name}
+        if x is not None and y is not None and yaw is not None:
+            payload_dict.update({"x": x, "y": y, "yaw": yaw})
+        payload = json.dumps(payload_dict)
+        msg = String()
+        msg.data = payload
+        self.voice_record_cmd_pub.publish(msg)
+        self.get_logger().info(f"Published record place command: '{payload}'")
 

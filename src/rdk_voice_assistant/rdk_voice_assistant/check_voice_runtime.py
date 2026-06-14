@@ -4,6 +4,16 @@ import socket
 from pathlib import Path
 import yaml
 
+def resolve_path(path_str):
+    if not path_str:
+        return Path()
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+    if path_str.startswith('~'):
+        return path.expanduser()
+    return Path.home() / path
+
 def check_package(package_name):
     try:
         __import__(package_name)
@@ -17,12 +27,12 @@ def check_file(label, path):
     if not path:
         print(f"  [SKIP] {label}: path is empty.")
         return True
-    p = Path(path)
-    if p.exists():
-        print(f"  [PASS] {label} model file exists at: {path}")
+    resolved_path = resolve_path(path)
+    if resolved_path.exists():
+        print(f"  [PASS] {label} model file exists at: {resolved_path}")
         return True
     else:
-        print(f"  [FAIL] {label} model file is MISSING at: {path}")
+        print(f"  [FAIL] {label} model file is MISSING at: {resolved_path} (original: {path})")
         return False
 
 def is_port_free(port):
@@ -73,7 +83,8 @@ def main():
 
     # 3. Check configuration & model files
     print("\n3. Checking Configured ASR/TTS Offline Model Files:")
-    config_path = "/home/linrain/rdkrobot_ws/src/rdk_voice_assistant/config/local_voice.yaml"
+    current_dir = Path(__file__).resolve().parent
+    config_path = str(current_dir.parent / "config" / "local_voice.yaml")
     if not os.path.exists(config_path):
         print(f"  [WARN] Configuration file not found at default path: {config_path}")
     else:

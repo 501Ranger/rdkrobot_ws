@@ -2,6 +2,7 @@ local_stt_node:
   ros__parameters:
     command_text_topic: /voice/command_text
     partial_text_topic: /voice/partial_text
+    dialog_control_topic: /voice/dialog_control
     model_path: ''
     sample_rate: 16000
     block_size: 2000
@@ -26,13 +27,13 @@ local_stt_node:
     bypass_words: '开,关,停,去,走'
     # Sherpa-ONNX SenseVoice ASR configurations (offline high-accuracy)
     asr_engine: 'sherpa-onnx'
-    sherpa_onnx_asr_model: '/home/linrain/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
-    sherpa_onnx_asr_tokens: '/home/linrain/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
+    sherpa_onnx_asr_model: '~/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
+    sherpa_onnx_asr_tokens: '~/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
     sherpa_onnx_asr_num_threads: 2
-    sherpa_onnx_streaming_encoder: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/encoder-epoch-99-avg-1.int8.onnx'
-    sherpa_onnx_streaming_decoder: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/decoder-epoch-99-avg-1.int8.onnx'
-    sherpa_onnx_streaming_joiner: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx'
-    sherpa_onnx_streaming_tokens: '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt'
+    sherpa_onnx_streaming_encoder: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/encoder-epoch-99-avg-1.int8.onnx'
+    sherpa_onnx_streaming_decoder: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/decoder-epoch-99-avg-1.int8.onnx'
+    sherpa_onnx_streaming_joiner: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx'
+    sherpa_onnx_streaming_tokens: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt'
 
 local_tts_node:
   ros__parameters:
@@ -48,16 +49,16 @@ local_tts_node:
     audio_player: aplay
     print_text: true
     # Sherpa-ONNX VITS offline engine configuration
-    sherpa_onnx_model: '/home/linrain/vits-zh-aishell3/vits-aishell3.onnx'
-    sherpa_onnx_lexicon: '/home/linrain/vits-zh-aishell3/lexicon.txt'
-    sherpa_onnx_tokens: '/home/linrain/vits-zh-aishell3/tokens.txt'
+    sherpa_onnx_model: '~/vits-zh-aishell3/vits-aishell3.onnx'
+    sherpa_onnx_lexicon: '~/vits-zh-aishell3/lexicon.txt'
+    sherpa_onnx_tokens: '~/vits-zh-aishell3/tokens.txt'
     sherpa_onnx_data_dir: ''
     sherpa_onnx_speaker_id: 115
     sherpa_onnx_speed: 0.85
     sherpa_onnx_noise_scale: 0.667
     sherpa_onnx_noise_scale_w: 0.8
     sherpa_onnx_tts_num_threads: 2
-    tts_cache_dir: '/home/linrain/.ros/rdk_voice_assistant/tts_cache'
+    tts_cache_dir: '~/.ros/rdk_voice_assistant/tts_cache'
     max_cache_text_length: 15
 
 

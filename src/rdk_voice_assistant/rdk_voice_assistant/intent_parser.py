@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
 
@@ -25,7 +26,22 @@ DEFAULT_PLACE_ALIASES: Dict[str, str] = {
 }
 
 
-RECORD_KEYWORDS = ('记录当前位置为', '把当前位置记作', '把当前位置设置为', '记录当前位置作', '设置当前位置为', '当前位置记为', '当前位置设置为')
+RECORD_KEYWORDS = (
+    '记录当前位置为', '记录当前位置成', '记录当前位置作',
+    '把当前位置记作', '把当前位置记为',
+    '把当前位置设置成为', '把当前位置设置为', '把当前位置设置成',
+    '设置当前位置成为', '设置当前位置为', '设置当前位置成',
+    '当前位置设置成为', '当前位置设置为', '当前位置设置成',
+    '把这里设置成为', '把这里设置为', '把这里设置成',
+    '这里设置成为', '这里设置为', '这里设置成',
+)
+RECORD_PLACE_PATTERNS = (
+    re.compile(r'(?:请|帮我)?(?:把)?(?:当前位置|这里|这儿|这个地方|这地方|此处)(?:设置成为|设置为|设置成|设定为|设定成|设为|设成|命名为|命名成|取名为|叫做|叫|记作|记为|标记为|标记成|保存为|保存成|记录为|记录成)(?P<place>[^，。！？,.!?\s]{1,20})'),
+    re.compile(r'(?:请|帮我)?(?:保存|记录|标记)(?:当前位置|这里|这儿|这个地方|这地方|此处)(?:为|成|成为|作)(?P<place>[^，。！？,.!?\s]{1,20})'),
+    re.compile(r'(?:以后)?(?:这里|这儿|这个地方|这地方|此处)(?:就)?(?:叫做|叫|命名为|命名成)(?P<place>[^，。！？,.!?\s]{1,20})'),
+    re.compile(r'以后(?:这里|这儿|这个地方|这地方|此处)(?:就)?是(?P<place>[^，。！？,.!?\s]{1,20})'),
+)
+
 STOP_KEYWORDS = ('停止', '停下', '别动', '不要动', '急停', '刹车', '暂停')
 PATROL_KEYWORDS = ('巡查', '巡视', '巡逻', '检查一圈', '看一圈')
 STATUS_KEYWORDS = ('状态', '在哪里', '在哪', '电量', '位置')
@@ -49,13 +65,9 @@ def parse_intent(
     if _contains_any(cleaned, COME_HERE_KEYWORDS):
         return Intent(name='come_here', raw_text=text)
 
-    for kw in RECORD_KEYWORDS:
-        if kw in cleaned:
-            parts = cleaned.split(kw)
-            if len(parts) > 1:
-                place_name = parts[1].strip()
-                if place_name:
-                    return Intent(name='record_place', raw_text=text, place=place_name)
+    place_name = _match_record_place(cleaned)
+    if place_name:
+        return Intent(name='record_place', raw_text=text, place=place_name)
 
     if _contains_any(cleaned, LOOK_AT_SOUND_KEYWORDS):
         return Intent(name='look_at_sound', raw_text=text)
@@ -80,6 +92,33 @@ def parse_intent(
         return Intent(name='go_to', raw_text=text, place=place)
 
     return Intent(name='chat', raw_text=text, confidence=0.4)
+
+
+
+def _match_record_place(text: str) -> Optional[str]:
+    for kw in RECORD_KEYWORDS:
+        if kw in text:
+            parts = text.split(kw, 1)
+            if len(parts) > 1:
+                place_name = _clean_place_name(parts[1])
+                if place_name:
+                    return place_name
+
+    for pattern in RECORD_PLACE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            place_name = _clean_place_name(match.group('place'))
+            if place_name:
+                return place_name
+
+    return None
+
+
+def _clean_place_name(place_name: str) -> str:
+    place_name = place_name.strip(' ，。！？,.!?')
+    while place_name and place_name[-1] in '吧呀啊呢啦了哦':
+        place_name = place_name[:-1]
+    return place_name.strip()
 
 
 def _normalize(text: str) -> str:

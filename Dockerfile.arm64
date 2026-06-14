@@ -13,8 +13,11 @@ COPY build_arm64_temp_src/src /workspace/src
 
 # 更新 apt 并使用 rosdep 安装所有 package.xml 声明的系统依赖
 RUN apt-get update && \
-    rosdep update && \
-    rosdep install --from-path src --ignore-src -y --rosdistro humble --skip-keys "gazebo_ros" && \
+    apt-get install -y python3-pip && \
+    pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple rosdepc && \
+    rosdepc init && \
+    rosdepc update && \
+    rosdepc install --from-path src --ignore-src -y --rosdistro humble --skip-keys "gazebo_ros" && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /workspace/src
 

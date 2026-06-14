@@ -3,6 +3,7 @@ import math
 import threading
 import rclpy
 from rclpy.node import Node
+from rosgraph_msgs.msg import Clock
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from rclpy.action import ActionClient
 from std_msgs.msg import String, Bool
@@ -123,6 +124,12 @@ class RobotApiNode(Node):
         self.nav_action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.compute_path_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
 
+        # 订阅仿真时钟话题，解决 rclpy 仿真时间戳同步不准问题
+        self.latest_sim_time = None
+        self.clock_sub = self.create_subscription(
+            Clock, "/clock", self.clock_callback, 10
+        )
+
         # 内部缓存状态
         self._lock = threading.Lock()
         self.battery_pct = 0.0
@@ -180,6 +187,10 @@ class RobotApiNode(Node):
                     "updated_at": self.latest_voice_update_time
                 }
             }
+
+    def clock_callback(self, msg: Clock):
+        with self._lock:
+            self.latest_sim_time = msg.clock
 
     def battery_callback(self, msg: BatteryState):
         with self._lock:
@@ -420,7 +431,11 @@ class RobotApiNode(Node):
         默认以地图原点 (0, 0, 0) 作为初始猜测值，用户可在实际场景中重定位修正。
         """
         msg = PoseWithCovarianceStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        with self._lock:
+            if self.latest_sim_time:
+                msg.header.stamp = self.latest_sim_time
+            else:
+                msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "map"
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
@@ -492,7 +507,11 @@ class RobotApiNode(Node):
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        with self._lock:
+            if self.latest_sim_time:
+                goal_msg.pose.header.stamp = self.latest_sim_time
+            else:
+                goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
         goal_msg.pose.pose.position.x = x
         goal_msg.pose.pose.position.y = y
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)

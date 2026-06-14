@@ -69,10 +69,17 @@ done
 if [ ${#SPECIFIED_PACKAGES[@]} -gt 0 ]; then
   BUILD_ARGS="--packages-select ${SPECIFIED_PACKAGES[*]}"
   echo ">>> 检测到手动指定了编译包: ${SPECIFIED_PACKAGES[*]}"
-elif [ "$FORCE_BUILD" = true ]; then
-  BUILD_ARGS="--packages-skip multirobot_map_merge"
-  echo ">>> 已启用强制全量编译..."
 else
+  # 如果没有手动指定编译包，且 install_arm64 目录为空或不存在，自动启用全量编译
+  if [ ! -d "install_arm64" ] || [ -z "$(ls -A install_arm64 2>/dev/null)" ]; then
+    FORCE_BUILD=true
+    echo ">>> 检测到 install_arm64 目录不存在或为空，自动启用全量编译以构建所有依赖..."
+  fi
+
+  if [ "$FORCE_BUILD" = true ]; then
+    BUILD_ARGS="--packages-skip multirobot_map_merge"
+    echo ">>> 已启用强制全量编译..."
+  else
   echo ">>> 正在分析工作空间中发生修改的 ROS 2 功能包..."
   CHANGED_PKGS=$(python3 -c "
 import subprocess, os
@@ -138,9 +145,11 @@ print(get_changed())
     echo ">>> 检测到以下被修改的功能包，将执行增量编译: ${FILTERED_PKGS[*]}"
   fi
 fi
+fi
 
-echo "⚠️  注意: 为防止 QEMU 模拟多线程编译发生段错误(Segfault)，我们将限制使用单线程顺序编译..."
+echo "⚠️  注意: 为防止 QEMU 模拟多线程编译发生段错误(Segfault)，我们将限制使用单线程顺序编译，并调大 QEMU 栈大小..."
 docker run --rm \
+  -e QEMU_STACK_SIZE=536870912 \
   -v "${WORKSPACE_DIR}":/workspace \
   -w /workspace \
   rdk_robot_build:arm64 \

@@ -203,6 +203,11 @@ function updateTelemetry(data) {
     // 更新重定位状态
     updateLocalizeStatusDisplay(data.is_localizing);
 
+    // 实时更新语音助手控制面板状态
+    if (data.voice_status && typeof window.updateVoiceUI === "function") {
+        window.updateVoiceUI(data.voice_status);
+    }
+
     // 更新下位机在线状态
     updateMcuStatus(data.mcu_online);
 

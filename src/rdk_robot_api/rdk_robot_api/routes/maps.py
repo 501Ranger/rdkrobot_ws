@@ -144,7 +144,7 @@ async def load_map_into_navigation(map_name: str):
         sim_flag = "true" if use_sim else "false"
         cmd = [
             "bash", "-c",
-            f"source /opt/ros/humble/setup.bash && source {config.WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
+            f"source /opt/ros/humble/setup.bash && source {config.WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag} map:={yaml_path}"
         ]
         try:
             m.loc_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
@@ -190,11 +190,48 @@ async def load_map_into_navigation(map_name: str):
         # 地图加载成功后，自动向 AMCL 发布初始位姿 (0, 0, 0)
         # 这使 AMCL 立即开始发布 map->odom TF，解除 costmap 的 "map frame not exist" 报错
         # 实际场景中用户应随后使用"一键全局重定位"来获得精确定位
-        await asyncio.sleep(1.5)  # 等待 AMCL 节点完成激活
-        rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
+        # 1. ⚠️ 等待里程计数据到位，确保定位精准对齐
+        rn.ros_node.get_logger().info("Waiting for first odom message to establish base pose...")
+        odom_received = False
+        for _ in range(100):  # 最多等10秒
+            if rn.ros_node.last_odom_time > 0.0:
+                odom_received = True
+                break
+            await asyncio.sleep(0.1)
+            
+        if not odom_received:
+            rn.ros_node.get_logger().warn("Odom not received yet. Falling back to default (0,0,0) pose.")
+            
+        pose = rn.ros_node.robot_pose
+        await asyncio.sleep(1.5)  # 等待 AMCL 节点完成基本激活
+        
+        # 2. 发布里程计绝对坐标作为 AMCL 的 initial_pose
+        rn.ros_node.publish_initial_pose(x=pose["x"], y=pose["y"], yaw=pose["yaw"])
         rn.ros_node.get_logger().info(
-            f"Map '{map_name}' loaded. Auto-published initial pose (0,0,0) to bootstrap AMCL TF."
+            f"Map '{map_name}' loaded. Auto-published initial pose: "
+            f"x={pose['x']:.3f}, y={pose['y']:.3f}, yaw={pose['yaw']:.3f} to bootstrap AMCL TF."
         )
+        
+        # 3. ⚠️ 确保 Nav2 NavigateToPose Action 服务器就绪，并留有额外激活缓冲，防止抢跑被拒
+        rn.ros_node.get_logger().info("Waiting for NavigateToPose Action Server to become active...")
+        action_ready = False
+        for _ in range(100):  # 最多等待 10.0 秒
+            if rn.ros_node.nav_action_client.server_is_ready():
+                action_ready = True
+                break
+            await asyncio.sleep(0.1)
+            
+        if not action_ready:
+            rn.ros_node.get_logger().error("NavigateToPose Action Server did not become active!")
+            raise HTTPException(
+                status_code=503,
+                detail="Map loaded but Nav2 Action Server did not become active in time."
+            )
+            
+        # 多缓冲 3.0 秒给 Lifecycle Nodes 完成最终 ACTIVE 过渡，提供万无一失的就绪状态
+        rn.ros_node.get_logger().info("Action server found. Waiting 3.0s for lifecycle transition buffer...")
+        await asyncio.sleep(3.0)
+        rn.ros_node.get_logger().info("Navigation stack is fully ready for commands!")
         
         return {"status": "success", "message": f"Successfully loaded map: {map_name}"}
     else:

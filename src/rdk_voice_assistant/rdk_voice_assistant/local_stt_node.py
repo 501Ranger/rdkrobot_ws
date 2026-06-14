@@ -29,6 +29,7 @@ class LocalSttNode(Node):
         self.declare_parameter('command_text_topic', '/voice/command_text')
         self.declare_parameter('partial_text_topic', '/voice/partial_text')
         self.declare_parameter('reply_text_topic', '/assistant/reply_text')
+        self.declare_parameter('dialog_control_topic', '/voice/dialog_control')
         self.declare_parameter('model_path', '')
         self.declare_parameter('sample_rate', 16000)
         self.declare_parameter('block_size', 2000)
@@ -57,15 +58,15 @@ class LocalSttNode(Node):
 
         # Sherpa-ONNX SenseVoice ASR configurations
         self.declare_parameter('asr_engine', 'sherpa-onnx')
-        self.declare_parameter('sherpa_onnx_asr_model', '/home/linrain/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx')
-        self.declare_parameter('sherpa_onnx_asr_tokens', '/home/linrain/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt')
+        self.declare_parameter('sherpa_onnx_asr_model', '~/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx')
+        self.declare_parameter('sherpa_onnx_asr_tokens', '~/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt')
         self.declare_parameter('sherpa_onnx_asr_num_threads', 2)
 
         # Sherpa-ONNX Streaming Zipformer ASR configurations
-        self.declare_parameter('sherpa_onnx_streaming_encoder', '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/encoder-epoch-99-avg-1.int8.onnx')
-        self.declare_parameter('sherpa_onnx_streaming_decoder', '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/decoder-epoch-99-avg-1.int8.onnx')
-        self.declare_parameter('sherpa_onnx_streaming_joiner', '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx')
-        self.declare_parameter('sherpa_onnx_streaming_tokens', '/home/linrain/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt')
+        self.declare_parameter('sherpa_onnx_streaming_encoder', '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/encoder-epoch-99-avg-1.int8.onnx')
+        self.declare_parameter('sherpa_onnx_streaming_decoder', '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/decoder-epoch-99-avg-1.int8.onnx')
+        self.declare_parameter('sherpa_onnx_streaming_joiner', '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx')
+        self.declare_parameter('sherpa_onnx_streaming_tokens', '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt')
 
         self.command_pub = self.create_publisher(
             String,
@@ -80,6 +81,11 @@ class LocalSttNode(Node):
         self.reply_pub = self.create_publisher(
             String,
             str(self.get_parameter('reply_text_topic').value),
+            10,
+        )
+        self.dialog_control_pub = self.create_publisher(
+            String,
+            str(self.get_parameter('dialog_control_topic').value),
             10,
         )
 
@@ -140,6 +146,16 @@ class LocalSttNode(Node):
             self.get_logger().info('Local STT node started with VAD & Dynamic Wake Window. Engine: Vosk')
 
         self.worker.start()
+
+    def _resolve_path(self, path_str: str) -> Path:
+        if not path_str:
+            return Path()
+        path = Path(path_str)
+        if path.is_absolute():
+            return path
+        if path_str.startswith('~'):
+            return path.expanduser()
+        return Path.home() / path
 
     def destroy_node(self):
         self.stop_event.set()
@@ -224,8 +240,8 @@ class LocalSttNode(Node):
             self.get_logger().error(str(exc))
             return
 
-        model_path = str(self.get_parameter('sherpa_onnx_asr_model').value)
-        tokens_path = str(self.get_parameter('sherpa_onnx_asr_tokens').value)
+        model_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_asr_model').value))
+        tokens_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_asr_tokens').value))
         num_threads = int(self.get_parameter('sherpa_onnx_asr_num_threads').value)
         sample_rate = int(self.get_parameter('sample_rate').value)
         block_size = int(self.get_parameter('block_size').value)
@@ -407,10 +423,10 @@ class LocalSttNode(Node):
             self.get_logger().error(str(exc))
             return
 
-        encoder_path = str(self.get_parameter('sherpa_onnx_streaming_encoder').value)
-        decoder_path = str(self.get_parameter('sherpa_onnx_streaming_decoder').value)
-        joiner_path = str(self.get_parameter('sherpa_onnx_streaming_joiner').value)
-        tokens_path = str(self.get_parameter('sherpa_onnx_streaming_tokens').value)
+        encoder_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_streaming_encoder').value))
+        decoder_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_streaming_decoder').value))
+        joiner_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_streaming_joiner').value))
+        tokens_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_streaming_tokens').value))
         num_threads = int(self.get_parameter('sherpa_onnx_asr_num_threads').value)
         sample_rate = int(self.get_parameter('sample_rate').value)
         block_size = int(self.get_parameter('block_size').value)
@@ -597,7 +613,7 @@ class LocalSttNode(Node):
             return
 
         # 1. Parameter loading and calculations
-        model_path = str(self.get_parameter('model_path').value)
+        model_path = str(self._resolve_path(self.get_parameter('model_path').value))
         sample_rate = int(self.get_parameter('sample_rate').value)
         block_size = int(self.get_parameter('block_size').value)
         device = self._parse_device(str(self.get_parameter('device').value))
@@ -809,7 +825,9 @@ class LocalSttNode(Node):
 
                 # If they ONLY said the wake word, e.g. "小智", give vocal feedback
                 if not text:
-                    self.get_logger().info('Wake word detected. Replying welcome...')
+                    self.get_logger().info('Wake word detected. Cancelling stale dialog and replying welcome...')
+                    self.dialog_control_pub.publish(String(data='wake'))
+                    self.reply_pub.publish(String(data='__CLEAR__'))
                     self.reply_pub.publish(String(data='我在'))
                     return
             else:

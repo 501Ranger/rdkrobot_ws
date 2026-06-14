@@ -51,6 +51,10 @@
                     <span class="nav-icon">📅</span>
                     <span class="nav-text">巡逻与任务</span>
                 </button>
+                <button class="nav-item" id="sidebar-tab-voice" data-view="view-voice">
+                    <span class="nav-icon">🎙️</span>
+                    <span class="nav-text">语音助手</span>
+                </button>
                 <button class="nav-item" id="sidebar-tab-system" data-view="view-system">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-text">开发与调试</span>
@@ -645,7 +649,192 @@
                     </div>
                 </div>
 
-                <!-- ==================== 4. 开发与调试 VIEW ==================== -->
+                <!-- ==================== 4. 语音助手 VIEW ==================== -->
+                <div class="view-pane hidden" id="view-voice">
+                    <style>
+                        .voice-layout {
+                            display: grid;
+                            grid-template-columns: 1fr 1.2fr;
+                            gap: 20px;
+                            align-items: start;
+                        }
+                        @media (max-width: 1024px) {
+                            .voice-layout {
+                                grid-template-columns: 1fr;
+                                gap: 16px;
+                            }
+                        }
+                        @media (max-width: 768px) {
+                            .voice-layout {
+                                display: flex !important;
+                                flex-direction: column !important;
+                                align-items: stretch !important;
+                                gap: 12px !important;
+                            }
+                            .voice-panel-left,
+                            .voice-panel-right {
+                                display: contents !important;
+                            }
+                        }
+                    </style>
+                    <div class="voice-layout">
+                        <!-- 左面板：语音模拟与测试 -->
+                        <div class="voice-panel-left" style="display: flex; flex-direction: column; gap: 20px;">
+                            
+                            <!-- 语音指令注入与播报 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🎙️ 语音指令与播报模拟</h2>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 10px;">
+                                    <!-- 语音指令注入 -->
+                                    <div class="form-row" style="margin: 0;">
+                                        <label style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">模拟语音指令（直接发送文本）</label>
+                                        <div style="display: flex; gap: 8px;">
+                                            <input type="text" id="voice-command-input" placeholder="例如：去客厅、开始巡查、停止" class="form-input" style="flex: 1;">
+                                            <button class="btn btn-primary" id="btn-voice-command-send" style="padding: 0 16px; height: 36px; font-size: 0.85rem;">发送指令</button>
+                                        </div>
+                                    </div>
+                                    <div class="divider" style="margin: 6px 0; border: none; border-top: 1px dashed var(--border-color);"></div>
+                                    <!-- TTS 语音播报测试 -->
+                                    <div class="form-row" style="margin: 0;">
+                                        <label style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">模拟语音播报测试（TTS 扬声器播放）</label>
+                                        <div style="display: flex; gap: 8px;">
+                                            <input type="text" id="voice-tts-input" placeholder="例如：小车已就绪，等待指令" class="form-input" style="flex: 1;">
+                                            <button class="btn btn-secondary" id="btn-voice-tts-send" style="padding: 0 16px; height: 36px; font-size: 0.85rem;">测试播报</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 声源定位模拟器 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>🔊 声源定位（SSL）模拟器</h2>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 10px;">
+                                    <p class="section-desc" style="font-size: 0.72rem; margin: 0; line-height: 1.4;">在没有物理麦克风阵列硬件时，可以通过下面滑杆模拟声源方向，测试机器人的“听声辨位”转头跟随机能。</p>
+                                    
+                                    <div class="form-row" style="margin: 0;">
+                                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">
+                                            <span>声源角度 (度)</span>
+                                            <span id="ssl-angle-val" style="color: var(--accent-cyan); font-weight: bold; font-family: 'Orbitron', sans-serif;">0°</span>
+                                        </div>
+                                        <input type="range" id="ssl-angle-input" min="-180" max="180" value="0" style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; outline: none; transition: var(--transition);">
+                                        <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); margin-top: 2px;">
+                                            <span>-180° (后方)</span>
+                                            <span>0° (正前)</span>
+                                            <span>180° (后方)</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-row" style="margin: 0;">
+                                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">
+                                            <span>置信度</span>
+                                            <span id="ssl-confidence-val" style="color: var(--accent-cyan); font-weight: bold; font-family: 'Orbitron', sans-serif;">1.00</span>
+                                        </div>
+                                        <input type="range" id="ssl-confidence-input" min="0" max="100" value="100" style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; outline: none; transition: var(--transition);">
+                                    </div>
+                                    
+                                    <button class="btn btn-warning btn-block" id="btn-ssl-simulate" style="margin-top: 4px; height: 36px; font-size: 0.85rem;">🔊 模拟发生定位事件</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右面板：状态监控与地标库配置 -->
+                        <div class="voice-panel-right" style="display: flex; flex-direction: column; gap: 20px;">
+                            
+                            <!-- 语音助手实时状态看板 -->
+                            <div class="card glass-card">
+                                <div class="card-header">
+                                    <h2>📊 语音中枢实时监控状态</h2>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-top: 10px;">
+                                    <div class="stat-box glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 10px; background: rgba(255,255,255,0.02);">
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">最新识别指令</span>
+                                        <div id="voice-status-cmd" style="font-size: 0.95rem; font-weight: 600; color: var(--accent-cyan); word-break: break-all;">--</div>
+                                        <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); margin-top: 2px;">
+                                            <span>指令来源: <span id="voice-status-src">--</span></span>
+                                            <span>更新时间: <span id="voice-status-time">--</span></span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="stat-box glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 10px; background: rgba(255,255,255,0.02);">
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">最新语音回复 (TTS)</span>
+                                        <div id="voice-status-tts" style="font-size: 0.9rem; font-weight: 500; color: var(--accent-green); line-height: 1.4; word-break: break-all;">--</div>
+                                    </div>
+
+                                    <div class="stat-box glass-card" style="display: flex; flex-direction: column; gap: 4px; padding: 10px; background: rgba(255,255,255,0.02);">
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">声源测角</span>
+                                        <div id="voice-status-angle" style="font-family: 'Orbitron', sans-serif; font-size: 1.1rem; font-weight: 700; color: var(--accent-orange);">0.0°</div>
+                                    </div>
+                                    
+                                    <div class="stat-box glass-card" style="display: flex; flex-direction: column; gap: 4px; padding: 10px; background: rgba(255,255,255,0.02);">
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">声源置信度</span>
+                                        <div id="voice-status-conf" style="font-family: 'Orbitron', sans-serif; font-size: 1.1rem; font-weight: 700; color: var(--accent-orange);">0.00</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 语音地标库配置 (places.yaml) -->
+                            <div class="card glass-card">
+                                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                                    <h2>🗺️ 语音地标导航配置 (places.yaml)</h2>
+                                    <button class="btn btn-secondary btn-icon-refresh" id="btn-voice-places-refresh" title="刷新列表" style="padding: 0 10px; height: 28px;">🔄</button>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 10px;">
+                                    <!-- 地标列表滚动区 -->
+                                    <div class="places-scroll-area" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); background: rgba(0,0,0,0.15);">
+                                        <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: left;">
+                                            <thead style="background: rgba(255,255,255,0.04); position: sticky; top: 0; z-index: 5;">
+                                                <tr>
+                                                    <th style="padding: 6px 10px; color: var(--text-secondary); font-weight: 500;">地标名称</th>
+                                                    <th style="padding: 6px 10px; color: var(--text-secondary); font-weight: 500;">别名</th>
+                                                    <th style="padding: 6px 10px; color: var(--text-secondary); font-weight: 500;">X (m)</th>
+                                                    <th style="padding: 6px 10px; color: var(--text-secondary); font-weight: 500;">Y (m)</th>
+                                                    <th style="padding: 6px 10px; color: var(--text-secondary); font-weight: 500;">Yaw (rad)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="voice-places-table-body">
+                                                <tr>
+                                                    <td colspan="5" style="text-align: center; padding: 12px; color: var(--text-muted);">正在加载语音地标配置...</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    <!-- 添加/修改语音地标 -->
+                                    <div class="divider" style="margin: 4px 0; border: none; border-top: 1px solid var(--border-color);"></div>
+                                    <div style="font-size: 0.75rem; font-weight: 600; color: var(--accent-cyan);">➕ 快捷配置/更新语音地标</div>
+                                    <div class="form-row-grid" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 8px; margin: 0;">
+                                        <div class="form-row" style="margin: 0; gap: 2px;">
+                                            <label style="font-size: 0.65rem; color: var(--text-secondary);">地标名称</label>
+                                            <input type="text" id="voice-place-name" placeholder="例如: 客厅" class="form-input" style="padding: 4px 8px; font-size: 0.75rem; height: 28px;">
+                                        </div>
+                                        <div class="form-row" style="margin: 0; gap: 2px;">
+                                            <label style="font-size: 0.65rem; color: var(--text-secondary);">X (米)</label>
+                                            <input type="number" step="0.01" id="voice-place-x" placeholder="0.00" class="form-input" style="padding: 4px 8px; font-size: 0.75rem; height: 28px;">
+                                        </div>
+                                        <div class="form-row" style="margin: 0; gap: 2px;">
+                                            <label style="font-size: 0.65rem; color: var(--text-secondary);">Y (米)</label>
+                                            <input type="number" step="0.01" id="voice-place-y" placeholder="0.00" class="form-input" style="padding: 4px 8px; font-size: 0.75rem; height: 28px;">
+                                        </div>
+                                        <div class="form-row" style="margin: 0; gap: 2px;">
+                                            <label style="font-size: 0.65rem; color: var(--text-secondary);">Yaw (rad)</label>
+                                            <input type="number" step="0.05" id="voice-place-yaw" value="0.00" class="form-input" style="padding: 4px 8px; font-size: 0.75rem; height: 28px;">
+                                        </div>
+                                    </div>
+                                    <div style="font-size: 0.62rem; color: var(--text-secondary); line-height: 1.3;">
+                                        💡 提示：保存后，该地标会持久化同步到下位机语音模块的 [places.yaml] 中。您可以直接对着麦克风说“小车，去[地标名称]”启动声控导航。
+                                    </div>
+                                    <button class="btn btn-success btn-block" id="btn-voice-place-save" style="height: 32px; font-size: 0.8rem;">💾 保存地标物理坐标</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== 5. 开发与调试 VIEW ==================== -->
                 <div class="view-pane hidden" id="view-system">
                     <div class="system-layout">
                         <!-- 系统状态实时监测卡片 -->
@@ -821,6 +1010,7 @@
     <script src="/static/js/navigation.js"></script>
     <script src="/static/js/patrol.js"></script>
     <script src="/static/js/gamepad.js"></script>
+    <script src="/static/js/voice.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

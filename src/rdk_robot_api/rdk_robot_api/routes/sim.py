@@ -9,6 +9,17 @@ from ..config import WORKSPACE_SETUP_BASH
 
 router = APIRouter(prefix="/api/v1/sim", tags=["Simulation"])
 
+def is_wsl():
+    """Check if running inside Windows Subsystem for Linux"""
+    if not os.path.exists('/proc/version'):
+        return False
+    try:
+        with open('/proc/version', 'r') as f:
+            version_str = f.read().lower()
+            return 'microsoft' in version_str or 'wsl' in version_str
+    except Exception:
+        return False
+
 @router.post("/start")
 def start_gazebo_simulation():
     """启动 Gazebo 仿真"""
@@ -28,7 +39,12 @@ def start_gazebo_simulation():
         f"source /opt/ros/humble/setup.bash && source {WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup gazebo_bringup.launch.py"
     ]
     try:
-        m.sim_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        env = os.environ.copy()
+        if is_wsl():
+            env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+            if rn.ros_node:
+                rn.ros_node.get_logger().info("WSL2 environment detected. Enabling software rendering (LIBGL_ALWAYS_SOFTWARE=1) for Gazebo stability.")
+        m.sim_process = subprocess.Popen(cmd, preexec_fn=os.setsid, env=env)
         return {"status": "success", "message": "Gazebo simulation started successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start Gazebo simulation: {e}")
@@ -42,6 +58,10 @@ def stop_gazebo_simulation():
     try:
         m.terminate_process_group(m.sim_process)
         m.sim_process = None
+        os.system("pkill -9 -f gzserver || true")
+        os.system("pkill -9 -f gzclient || true")
+        os.system("pkill -9 -f gazebo || true")
         return {"status": "success", "message": "Gazebo simulation stopped successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to stop Gazebo simulation: {e}")
+

@@ -43,6 +43,7 @@ def generate_launch_description():
             'use_sim_time': use_sim_time,
             'map': map_yaml_file,
             'params_file': params_file,
+            'use_composition': 'False',
         }.items(),
     )
 

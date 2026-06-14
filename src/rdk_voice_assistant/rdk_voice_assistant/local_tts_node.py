@@ -39,9 +39,9 @@ class LocalTtsNode(Node):
         self.declare_parameter('print_text', True)
 
         # Sherpa-ONNX VITS configurations
-        self.declare_parameter('sherpa_onnx_model', '/home/linrain/vits-zh-aishell3/vits-aishell3.onnx')
-        self.declare_parameter('sherpa_onnx_lexicon', '/home/linrain/vits-zh-aishell3/lexicon.txt')
-        self.declare_parameter('sherpa_onnx_tokens', '/home/linrain/vits-zh-aishell3/tokens.txt')
+        self.declare_parameter('sherpa_onnx_model', '~/vits-zh-aishell3/vits-aishell3.onnx')
+        self.declare_parameter('sherpa_onnx_lexicon', '~/vits-zh-aishell3/lexicon.txt')
+        self.declare_parameter('sherpa_onnx_tokens', '~/vits-zh-aishell3/tokens.txt')
         self.declare_parameter('sherpa_onnx_data_dir', '')
         self.declare_parameter('sherpa_onnx_speaker_id', 2)
         self.declare_parameter('sherpa_onnx_speed', 1.0)
@@ -51,12 +51,19 @@ class LocalTtsNode(Node):
         self.declare_parameter('tts_cache_dir', '~/.ros/rdk_voice_assistant/tts_cache')
         self.declare_parameter('max_cache_text_length', 15)
 
-        self.cache_dir = Path(self.get_parameter('tts_cache_dir').value).expanduser()
+        self.cache_dir = self._resolve_path(self.get_parameter('tts_cache_dir').value)
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             self.get_logger().info(f'TTS Cache directory initialized at: {self.cache_dir}')
         except Exception as e:
             self.get_logger().error(f'Failed to create cache directory {self.cache_dir}: {e}')
+            fallback_dir = Path(tempfile.gettempdir()) / 'rdk_voice_assistant' / 'tts_cache'
+            try:
+                fallback_dir.mkdir(parents=True, exist_ok=True)
+                self.cache_dir = fallback_dir
+                self.get_logger().info(f'TTS Cache directory fallback initialized at: {self.cache_dir}')
+            except Exception as fe:
+                self.get_logger().error(f'Failed to create fallback cache directory {fallback_dir}: {fe}')
 
         self.tts_active_pub = self.create_publisher(Bool, '/voice/tts_active', 10)
         self.tts_status_pub = self.create_publisher(String, '/voice/tts_status', 10)
@@ -74,9 +81,15 @@ class LocalTtsNode(Node):
             10,
         )
 
-        self.get_logger().info(
-            f'Local TTS node started. Engine: {self.get_parameter("engine").value}'
-        )
+    def _resolve_path(self, path_str: str) -> Path:
+        if not path_str:
+            return Path()
+        path = Path(path_str)
+        if path.is_absolute():
+            return path
+        if path_str.startswith('~'):
+            return path.expanduser()
+        return Path.home() / path
 
     def destroy_node(self):
         self.stop_event.set()
@@ -305,10 +318,11 @@ class LocalTtsNode(Node):
             return
 
         # Load parameters
-        model_path = str(self.get_parameter('sherpa_onnx_model').value)
-        lexicon_path = str(self.get_parameter('sherpa_onnx_lexicon').value)
-        tokens_path = str(self.get_parameter('sherpa_onnx_tokens').value)
-        data_dir_path = str(self.get_parameter('sherpa_onnx_data_dir').value)
+        model_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_model').value))
+        lexicon_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_lexicon').value))
+        tokens_path = str(self._resolve_path(self.get_parameter('sherpa_onnx_tokens').value))
+        data_dir_param = self.get_parameter('sherpa_onnx_data_dir').value
+        data_dir_path = str(self._resolve_path(data_dir_param)) if data_dir_param else ''
         speaker_id = int(self.get_parameter('sherpa_onnx_speaker_id').value)
         speed = float(self.get_parameter('sherpa_onnx_speed').value)
         noise_scale = float(self.get_parameter('sherpa_onnx_noise_scale').value)
@@ -432,7 +446,7 @@ class LocalTtsNode(Node):
     def _speak_with_piper(self, text: str) -> None:
         text = self._normalize_numbers(text)
         executable = str(self.get_parameter('piper_executable').value)
-        model_path = str(self.get_parameter('piper_model_path').value)
+        model_path = str(self._resolve_path(self.get_parameter('piper_model_path').value))
         audio_player = str(self.get_parameter('audio_player').value)
 
         if not model_path:

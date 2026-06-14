@@ -19,6 +19,7 @@ class LlmDialogNode(Node):
 
         self.declare_parameter('robot_task_topic', '/voice/robot_task')
         self.declare_parameter('reply_text_topic', '/assistant/reply_text')
+        self.declare_parameter('dialog_control_topic', '/voice/dialog_control')
         self.declare_parameter('base_url', 'https://api.openai.com/v1')
         self.declare_parameter('model', 'gpt-4o-mini')
         self.declare_parameter('api_key', '')
@@ -55,12 +56,20 @@ class LlmDialogNode(Node):
             self._on_robot_task,
             10,
         )
+        self.create_subscription(
+            String,
+            str(self.get_parameter('dialog_control_topic').value),
+            self._on_dialog_control,
+            10,
+        )
 
         self.history: List[Dict[str, str]] = []
         self.lock = threading.Lock()
         self.busy = False
         self.active_text = ''
         self.request_seq = 0
+        self.active_request_id = 0
+        self.cancelled_through_seq = 0
 
         # Load city weather codes JSON
         self.city_codes = {}
@@ -105,17 +114,19 @@ class LlmDialogNode(Node):
                         f'Ignore duplicate chat task while busy: {text}'
                     )
                     return
-                self.get_logger().info(
-                    f'Busy with chat task: {self.active_text}; rejected: {text}'
+                self.cancelled_through_seq = max(
+                    self.cancelled_through_seq,
+                    self.active_request_id,
                 )
-                busy_reply = str(self.get_parameter('busy_reply').value).strip()
-                if bool(self.get_parameter('speak_busy_reply').value) and busy_reply:
-                    self._say(busy_reply)
-                return
+                self.get_logger().info(
+                    f'Cancel stale LLM request #{self.active_request_id}: '
+                    f'{self.active_text}; superseded by: {text}'
+                )
             self.busy = True
             self.active_text = text
             self.request_seq += 1
             request_id = self.request_seq
+            self.active_request_id = request_id
 
         self.get_logger().info(f'Start LLM request #{request_id}: {text}')
         threading.Thread(
@@ -124,15 +135,45 @@ class LlmDialogNode(Node):
             daemon=True,
         ).start()
 
+    def _on_dialog_control(self, msg: String) -> None:
+        command = msg.data.strip().lower()
+        if command not in {'wake', 'cancel', 'clear'}:
+            return
+
+        with self.lock:
+            if not self.busy:
+                return
+            request_id = self.active_request_id
+            text = self.active_text
+            self.cancelled_through_seq = max(self.cancelled_through_seq, request_id)
+            self.busy = False
+            self.active_text = ''
+            self.active_request_id = 0
+
+        self.get_logger().info(
+            f'Cancelled active LLM request #{request_id} by dialog control: '
+            f'{command}; text: {text}'
+        )
+
     def _reply_worker(self, request_id: int, text: str) -> None:
         try:
             # Try to intercept weather query locally
             weather_reply = self._handle_weather_query(text)
             if weather_reply:
+                if not self._is_request_current(request_id):
+                    self.get_logger().info(
+                        f'Discard stale local LLM reply #{request_id}: {text}'
+                    )
+                    return
                 self._say(weather_reply)
                 return
 
             reply = self._call_llm(text)
+            if not self._is_request_current(request_id):
+                self.get_logger().info(
+                    f'Discard stale LLM reply #{request_id}: {text}'
+                )
+                return
             if reply:
                 self._remember(text, reply)
                 self._say(reply)
@@ -140,12 +181,22 @@ class LlmDialogNode(Node):
                 self._say(str(self.get_parameter('error_reply').value))
         except Exception as exc:
             self.get_logger().error(f'LLM dialog failed: {exc}')
-            self._say(str(self.get_parameter('error_reply').value))
+            if self._is_request_current(request_id):
+                self._say(str(self.get_parameter('error_reply').value))
         finally:
             with self.lock:
-                self.busy = False
-                self.active_text = ''
+                if self.active_request_id == request_id:
+                    self.busy = False
+                    self.active_text = ''
+                    self.active_request_id = 0
             self.get_logger().info(f'Finish LLM request #{request_id}: {text}')
+
+    def _is_request_current(self, request_id: int) -> bool:
+        with self.lock:
+            return (
+                request_id > self.cancelled_through_seq
+                and self.active_request_id == request_id
+            )
 
     def _handle_weather_query(self, text: str) -> Optional[str]:
         if '天气' not in text:

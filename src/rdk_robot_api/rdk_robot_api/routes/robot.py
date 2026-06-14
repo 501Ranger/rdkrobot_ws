@@ -24,6 +24,15 @@ def read_index():
         return FileResponse(index_path)
     raise HTTPException(status_code=404, detail=f"index.html not found in {static_dir}")
 
+@router.get("/voice", response_class=HTMLResponse)
+def read_voice():
+    """返回独立的语音助手交互控制台"""
+    voice_path = os.path.join(static_dir, "voice.html")
+    if os.path.exists(voice_path):
+        return FileResponse(voice_path)
+    raise HTTPException(status_code=404, detail=f"voice.html not found in {static_dir}")
+
+
 @router.websocket("/ws/status")
 async def websocket_endpoint(websocket: WebSocket):
     await m.manager.connect(websocket)

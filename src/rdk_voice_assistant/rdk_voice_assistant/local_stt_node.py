@@ -71,6 +71,11 @@ class LocalSttNode(Node):
         self.declare_parameter('sherpa_onnx_streaming_joiner', '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx')
         self.declare_parameter('sherpa_onnx_streaming_tokens', '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt')
 
+        # Xiaomi MiMo ASR configurations
+        self.declare_parameter('mimo_api_key', '')
+        self.declare_parameter('mimo_base_url', 'https://api.xiaomimimo.com/v1')
+        self.declare_parameter('mimo_language', 'auto')
+
         self.command_pub = self.create_publisher(
             String,
             self.get_parameter('command_text_topic').value,
@@ -138,7 +143,10 @@ class LocalSttNode(Node):
         self.audio_queue = queue.Queue(maxsize=max_queue_chunks)
         self.stop_event = threading.Event()
 
-        if asr_engine == 'sherpa-onnx' or asr_engine == 'sherpa_onnx':
+        if asr_engine == 'mimo' or asr_engine == 'mimo-v2.5-asr':
+            self.worker = threading.Thread(target=self._run_mimo_asr, daemon=True)
+            self.get_logger().info('Local STT node started with VAD & Dynamic Wake Window. Engine: Xiaomi MiMo V2.5 ASR')
+        elif asr_engine == 'sherpa-onnx' or asr_engine == 'sherpa_onnx':
             self.worker = threading.Thread(target=self._run_sherpa_onnx_asr, daemon=True)
             self.get_logger().info('Local STT node started with VAD & Dynamic Wake Window. Engine: Sherpa-ONNX (SenseVoice)')
         elif asr_engine == 'sherpa-onnx-streaming' or asr_engine == 'sherpa_onnx_streaming':
@@ -230,6 +238,251 @@ class LocalSttNode(Node):
             duplicate_window_sec,
             logger=self.get_logger()
         )
+
+    def _run_mimo_asr(self) -> None:
+        try:
+            import io
+            import base64
+            import wave
+            import requests
+            import sounddevice as sd
+        except ImportError as exc:
+            self.get_logger().error(
+                f'Missing dependencies for MiMo ASR. Please install requests and sounddevice: {exc}'
+            )
+            self._publish_stt_status('error', f'Import failed: {exc}', 0.0, self.calibrated_threshold)
+            return
+
+        api_key = str(self.get_parameter('mimo_api_key').value).strip()
+        if not api_key:
+            import os
+            api_key = os.environ.get('MIMO_API_KEY', '').strip()
+        if not api_key:
+            # Auto-extract API key from llm_dialog.yaml
+            try:
+                import yaml
+                from ament_index_python.packages import get_package_share_directory
+                pkg_dir = Path(get_package_share_directory('rdk_voice_assistant'))
+                llm_config_path = pkg_dir / 'config' / 'llm_dialog.yaml'
+                if not llm_config_path.exists():
+                    llm_config_path = pkg_dir / 'config' / 'llm_dialog.example.yaml'
+                if llm_config_path.exists():
+                    with open(llm_config_path, 'r', encoding='utf-8') as f:
+                        cfg = yaml.safe_load(f)
+                        api_key = cfg.get('llm_dialog_node', {}).get('ros__parameters', {}).get('api_key', '').strip()
+            except Exception as e:
+                self.get_logger().warn(f"Failed to auto-load key from llm_dialog.yaml: {e}")
+
+        mimo_base_url = str(self.get_parameter('mimo_base_url').value).strip()
+        mimo_language = str(self.get_parameter('mimo_language').value).strip()
+        sample_rate = int(self.get_parameter('sample_rate').value)
+        block_size = int(self.get_parameter('block_size').value)
+        device = self._parse_device(str(self.get_parameter('device').value))
+
+        noise_threshold = int(self.get_parameter('noise_threshold').value)
+        silence_timeout_sec = float(self.get_parameter('silence_timeout_sec').value)
+
+        block_duration = block_size / sample_rate
+        max_silent_blocks = max(1, int(silence_timeout_sec / block_duration))
+        max_buffer_samples = int(float(self.get_parameter('max_speech_sec').value) * sample_rate)
+        min_utterance_samples = int(float(self.get_parameter('min_utterance_sec').value) * sample_rate)
+        calibration_chunks = self._calibration_chunk_count()
+
+        audio_buffer = []
+        buffer_samples = 0
+        in_speech = False
+        silent_block_count = 0
+
+        def callback(indata, frames, time, status):
+            if status:
+                self.get_logger().warn(str(status))
+            # Calculate RMS energy of this audio chunk
+            rms = np.sqrt(np.mean(indata**2)) * 32768.0 if len(indata) > 0 else 0.0
+            self._enqueue_audio((indata.copy(), rms))
+
+        # Check recalibrate flag
+        with self.calibration_lock:
+            self.calibration_rms = []
+            self.calibrated_threshold = float(noise_threshold)
+            self.recalibrate_flag = False
+
+        try:
+            with sd.InputStream(
+                samplerate=sample_rate,
+                blocksize=block_size,
+                device=device,
+                dtype='float32',
+                channels=1,
+                callback=callback,
+            ):
+                self.get_logger().info(
+                    f'Microphone opened (MiMo ASR). sample_rate={sample_rate}, device={device or "default"}, '
+                    f'block_size={block_size} (VAD period={block_duration*1000:.1f}ms)'
+                )
+                while not self.stop_event.is_set():
+                    try:
+                        data_tuple = self.audio_queue.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+
+                    chunk, rms = data_tuple
+
+                    # Check for recalibration request
+                    with self.calibration_lock:
+                        if self.recalibrate_flag:
+                            self.recalibrate_flag = False
+                            self.calibration_rms = []
+                            audio_buffer = []
+                            buffer_samples = 0
+                            in_speech = False
+                            silent_block_count = 0
+                            self._publish_stt_status('calibrating', 'Recalibrating VAD noise threshold...', rms, self.calibrated_threshold)
+
+                    # If TTS is active, keep the recording buffer clean and empty
+                    if self.tts_active:
+                        audio_buffer = []
+                        buffer_samples = 0
+                        in_speech = False
+                        silent_block_count = 0
+                        self._publish_stt_status('sleeping', 'Ignored: TTS Active', rms, self.calibrated_threshold)
+                        continue
+
+                    # VAD Auto-Calibration (first 1.5 seconds)
+                    with self.calibration_lock:
+                        cal_len = len(self.calibration_rms)
+                    if cal_len < calibration_chunks:
+                        with self.calibration_lock:
+                            self.calibration_rms.append(rms)
+                            cal_len = len(self.calibration_rms)
+                            if cal_len == calibration_chunks:
+                                self.calibrated_threshold, ambient_rms, spread = self._compute_vad_threshold(
+                                    self.calibration_rms,
+                                    float(noise_threshold),
+                                )
+                                self.get_logger().info(
+                                    f'VAD Auto-Calibration Complete. Ambient RMS: {ambient_rms:.1f}. '
+                                    f'Adaptive Threshold set to: {self.calibrated_threshold:.1f}. Spread: {spread:.2f}'
+                                )
+                        self._publish_stt_status('calibrating', 'Calibrating VAD noise threshold...', rms, self.calibrated_threshold)
+                        continue
+
+                    # Noise gate VAD
+                    if rms < self.calibrated_threshold:
+                        silent_block_count += 1
+                        if in_speech:
+                            audio_buffer.append(chunk)
+                            buffer_samples += len(chunk)
+                    else:
+                        silent_block_count = 0
+                        in_speech = True
+                        audio_buffer.append(chunk)
+                        buffer_samples += len(chunk)
+
+                    # Determine status and publish real-time info
+                    if in_speech:
+                        status = 'recording'
+                        detail = 'Speaking...'
+                    elif self.wake_active or not bool(self.get_parameter('require_wake_word').value):
+                        status = 'listening'
+                        detail = 'Listening...'
+                    else:
+                        status = 'sleeping'
+                        detail = 'Waiting for wake word'
+                    self._publish_stt_status(status, detail, rms, self.calibrated_threshold)
+
+                    # Silence timeout reached during speech: trigger MiMo transcription!
+                    if in_speech and (
+                        silent_block_count >= max_silent_blocks
+                        or buffer_samples >= max_buffer_samples
+                    ):
+                        if buffer_samples < min_utterance_samples:
+                            audio_buffer = []
+                            buffer_samples = 0
+                            in_speech = False
+                            silent_block_count = 0
+                            continue
+                        full_audio = np.concatenate(audio_buffer, axis=0).flatten()
+                        audio_buffer = []
+                        buffer_samples = 0
+                        in_speech = False
+                        silent_block_count = 0
+
+                        # Start transcription thread to avoid blocking the audio queue processing
+                        threading.Thread(
+                            target=self._transcribe_mimo,
+                            args=(full_audio, sample_rate, api_key, mimo_base_url, mimo_language),
+                            daemon=True
+                        ).start()
+        except Exception as exc:
+            self.get_logger().error(f'MiMo STT stream loop failed: {exc}')
+
+    def _transcribe_mimo(self, audio_data: np.ndarray, sample_rate: int, api_key: str, base_url: str, language: str) -> None:
+        try:
+            import io
+            import base64
+            import wave
+            import requests
+
+            if not api_key:
+                self.get_logger().error("MiMo API Key is empty. Please set MIMO_API_KEY environment variable.")
+                self._publish_stt_status('error', 'API Key missing', 0.0, self.calibrated_threshold)
+                return
+
+            self._publish_stt_status('decoding', 'MiMo decoding audio segment...', 0.0, self.calibrated_threshold)
+
+            # Convert numpy float32 to int16 PCM WAV bytes
+            pcm16 = (audio_data * 32767.0).clip(-32768, 32767).astype(np.int16)
+            wav_io = io.BytesIO()
+            with wave.open(wav_io, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(pcm16.tobytes())
+            
+            wav_bytes = wav_io.getvalue()
+            audio_base64 = base64.b64encode(wav_bytes).decode('utf-8')
+            audio_data_url = f"data:audio/wav;base64,{audio_base64}"
+
+            # Prepare API request payload
+            headers = {
+                "api-key": api_key,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "mimo-v2.5-asr",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_audio",
+                                "input_audio": {
+                                    "data": audio_data_url
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "asr_options": {
+                    "language": language
+                }
+            }
+
+            url = f"{base_url.rstrip('/')}/chat/completions"
+            response = requests.post(url, headers=headers, json=payload, timeout=8.0)
+            if response.status_code != 200:
+                self.get_logger().error(f"MiMo ASR API error (HTTP {response.status_code}): {response.text}")
+                self._publish_stt_status('error', f'API Error {response.status_code}', 0.0, self.calibrated_threshold)
+                return
+
+            res_json = response.json()
+            text = res_json['choices'][0]['message']['content'].strip()
+            text = re.sub(r'<\|.*?\|>', '', text).strip()
+            
+            self._handle_final_text(text)
+        except Exception as e:
+            self.get_logger().error(f"MiMo transcription failed: {e}")
+            self._publish_stt_status('error', f"Transcription failed: {e}", 0.0, self.calibrated_threshold)
 
     def _run_sherpa_onnx_asr(self) -> None:
         try:

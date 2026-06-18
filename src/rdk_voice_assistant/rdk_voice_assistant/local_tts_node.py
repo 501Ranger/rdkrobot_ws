@@ -51,6 +51,13 @@ class LocalTtsNode(Node):
         self.declare_parameter('tts_cache_dir', '~/.ros/rdk_voice_assistant/tts_cache')
         self.declare_parameter('max_cache_text_length', 15)
 
+        # Xiaomi MiMo TTS configurations
+        self.declare_parameter('mimo_api_key', '')
+        self.declare_parameter('mimo_base_url', 'https://api.xiaomimimo.com/v1')
+        self.declare_parameter('mimo_tts_model', 'mimo-v2.5-tts')
+        self.declare_parameter('mimo_voice', '冰糖')
+        self.declare_parameter('mimo_tts_prompt', '用轻快上扬的语调，明亮有活力，带着查到成绩后压抑不住的激动与小骄傲')
+
         self.cache_dir = self._resolve_path(self.get_parameter('tts_cache_dir').value)
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -146,6 +153,10 @@ class LocalTtsNode(Node):
 
     def _run_worker(self) -> None:
         engine = str(self.get_parameter('engine').value).lower()
+
+        if engine == 'mimo' or engine == 'mimo-v2.5-tts':
+            self._run_mimo_tts_worker()
+            return
 
         if engine == 'pyttsx3':
             self._run_pyttsx3_worker()
@@ -539,6 +550,132 @@ class LocalTtsNode(Node):
             return self._num_to_chinese(num)
         text = re.sub(r'\d+', repl_val, text)
         return text
+
+    def _run_mimo_tts_worker(self) -> None:
+        try:
+            import io
+            import base64
+            import wave
+            import requests
+            import numpy as np
+        except ImportError as exc:
+            self.get_logger().error(f'Missing dependencies for MiMo TTS: {exc}')
+            self._publish_tts_status('error', '', f'Import failed: {exc}')
+            return
+
+        api_key = str(self.get_parameter('mimo_api_key').value).strip()
+        if not api_key:
+            import os
+            api_key = os.environ.get('MIMO_API_KEY', '').strip()
+        if not api_key:
+            # Auto-extract API key from llm_dialog.yaml
+            try:
+                import yaml
+                from ament_index_python.packages import get_package_share_directory
+                pkg_dir = Path(get_package_share_directory('rdk_voice_assistant'))
+                llm_config_path = pkg_dir / 'config' / 'llm_dialog.yaml'
+                if not llm_config_path.exists():
+                    llm_config_path = pkg_dir / 'config' / 'llm_dialog.example.yaml'
+                if llm_config_path.exists():
+                    with open(llm_config_path, 'r', encoding='utf-8') as f:
+                        cfg = yaml.safe_load(f)
+                        api_key = cfg.get('llm_dialog_node', {}).get('ros__parameters', {}).get('api_key', '').strip()
+            except Exception as e:
+                self.get_logger().warn(f"Failed to auto-load key from llm_dialog.yaml: {e}")
+
+        mimo_base_url = str(self.get_parameter('mimo_base_url').value).strip()
+        mimo_tts_model = str(self.get_parameter('mimo_tts_model').value).strip()
+        mimo_voice = str(self.get_parameter('mimo_voice').value).strip()
+        mimo_tts_prompt = str(self.get_parameter('mimo_tts_prompt').value).strip()
+
+        self.audio_queue = queue.Queue(maxsize=5)
+        playback_thread = threading.Thread(target=self._run_playback_worker, daemon=True)
+        playback_thread.start()
+
+        self._publish_tts_status('ready')
+
+        while not self.stop_event.is_set():
+            try:
+                text = self.text_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if not text:
+                continue
+            text = self._normalize_numbers(text)
+            self._print_if_enabled(text)
+            self.tts_active_pub.publish(Bool(data=True))
+            self._publish_tts_status('speaking', text)
+            try:
+                if not api_key:
+                    raise ValueError("API Key is missing for MiMo TTS.")
+
+                headers = {
+                    "api-key": api_key,
+                    "Content-Type": "application/json"
+                }
+
+                messages = []
+                if mimo_tts_prompt:
+                    messages.append({
+                        "role": "user",
+                        "content": mimo_tts_prompt
+                    })
+                messages.append({
+                    "role": "assistant",
+                    "content": text
+                })
+
+                audio_params = {
+                    "format": "wav",
+                    "voice": mimo_voice
+                }
+                if mimo_tts_model == 'mimo-v2.5-tts-voicedesign':
+                    audio_params["optimize_text_preview"] = True
+                    audio_params.pop("voice", None)
+
+                payload = {
+                    "model": mimo_tts_model,
+                    "messages": messages,
+                    "audio": audio_params
+                }
+
+                url = f"{mimo_base_url.rstrip('/')}/chat/completions"
+                response = requests.post(url, headers=headers, json=payload, timeout=8.0)
+                if response.status_code != 200:
+                    raise RuntimeError(f"MiMo TTS API error (HTTP {response.status_code}): {response.text}")
+
+                res_json = response.json()
+                audio_base64 = res_json['choices'][0]['message']['audio']['data']
+                audio_bytes = base64.b64decode(audio_base64)
+
+                with wave.open(io.BytesIO(audio_bytes), 'rb') as wf:
+                    params = wf.getparams()
+                    n_channels, sampwidth, framerate, n_frames = params[:4]
+                    data = wf.readframes(n_frames)
+                    if sampwidth == 2:
+                        samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                    elif sampwidth == 1:
+                        samples = (np.frombuffer(data, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+                    else:
+                        samples = np.frombuffer(data, dtype=np.float32)
+
+                self.audio_queue.put((samples, framerate, text))
+            except Exception as exc:
+                self.get_logger().error(f"MiMo TTS failed for '{text}', falling back to pyttsx3: {exc}")
+                try:
+                    import pyttsx3
+                    local_engine = pyttsx3.init()
+                    local_engine.say(text)
+                    local_engine.runAndWait()
+                except Exception as fallback_exc:
+                    self.get_logger().error(f"TTS fallback failed: {fallback_exc}")
+                    self._publish_tts_status('error', text, str(exc))
+                finally:
+                    if self.audio_queue.empty() and self.text_queue.is_empty():
+                        self.tts_active_pub.publish(Bool(data=False))
+                        self._publish_tts_status('idle')
+
+        playback_thread.join(timeout=1.0)
 
     def _run_edge_tts_worker(self) -> None:
         try:

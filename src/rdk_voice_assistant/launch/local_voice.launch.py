@@ -56,12 +56,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'tts_engine',
             default_value='sherpa-onnx',
-            description='pyttsx3, espeak, piper, edge-tts, or sherpa-onnx',
+            description='pyttsx3, espeak, piper, edge-tts, sherpa-onnx, or mimo',
         ),
         DeclareLaunchArgument(
             'asr_engine',
             default_value='sherpa-onnx',
-            description='vosk, sherpa-onnx, or sherpa-onnx-streaming',
+            description='vosk, sherpa-onnx, sherpa-onnx-streaming, or mimo',
         ),
         DeclareLaunchArgument('start_stt', default_value='true'),
         DeclareLaunchArgument('start_tts', default_value='true'),

@@ -37,6 +37,10 @@ local_stt_node:
     sherpa_onnx_streaming_decoder: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/decoder-epoch-99-avg-1.int8.onnx'
     sherpa_onnx_streaming_joiner: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/joiner-epoch-99-avg-1.int8.onnx'
     sherpa_onnx_streaming_tokens: '~/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/tokens.txt'
+    # Xiaomi MiMo ASR configurations
+    mimo_api_key: ''
+    mimo_base_url: 'https://api.xiaomimimo.com/v1'
+    mimo_language: 'auto'
 
 local_tts_node:
   ros__parameters:
@@ -61,6 +65,12 @@ local_tts_node:
     sherpa_onnx_noise_scale: 0.667
     sherpa_onnx_noise_scale_w: 0.8
     sherpa_onnx_tts_num_threads: 2
+    # Xiaomi MiMo TTS configurations
+    mimo_api_key: ''
+    mimo_base_url: 'https://api.xiaomimimo.com/v1'
+    mimo_tts_model: 'mimo-v2.5-tts'
+    mimo_voice: '茉莉'
+    mimo_tts_prompt: ''
     tts_cache_dir: '~/.ros/rdk_voice_assistant/tts_cache'
     max_cache_text_length: 15
 

@@ -73,6 +73,7 @@ class RobotApiNode(Node):
         self.voice_reply_pub = self.create_publisher(String, "/assistant/reply_text", 10)
         self.voice_source_sim_pub = self.create_publisher(String, "/voice/source_event_sim", 10)
         self.voice_record_cmd_pub = self.create_publisher(String, "/voice/record_place_cmd", 10)
+        self.recalibrate_vad_pub = self.create_publisher(Bool, "/voice/recalibrate_vad", 10)
 
         # 订阅者
         self.battery_sub = self.create_subscription(
@@ -102,6 +103,9 @@ class RobotApiNode(Node):
         )
         self.voice_source_sub = self.create_subscription(
             String, "/voice/source_event", self.voice_source_callback, 10
+        )
+        self.voice_stt_status_sub = self.create_subscription(
+            String, "/voice/stt_status", self.voice_stt_status_callback, 10
         )
         self.patrol_feedback_sub = self.create_subscription(
             String, "/patrol/feedback", self.patrol_feedback_callback, 10
@@ -147,6 +151,14 @@ class RobotApiNode(Node):
         self.latest_source_confidence = 0.0
         self.latest_voice_update_time = 0.0
         
+        # VAD & STT 状态缓存
+        self.latest_stt_status = "--"
+        self.latest_stt_detail = "--"
+        self.latest_stt_rms = 0.0
+        self.latest_stt_threshold = 0.0
+        self.latest_speech_text = "--"
+        self.latest_speech_status = "--"
+        
         # 导航相关变量
         self.current_nav_goal_handle = None
         self.latest_goal_id = 0
@@ -184,7 +196,13 @@ class RobotApiNode(Node):
                     "latest_tts_text": self.latest_tts_text,
                     "source_angle": self.latest_source_angle,
                     "source_confidence": self.latest_source_confidence,
-                    "updated_at": self.latest_voice_update_time
+                    "updated_at": self.latest_voice_update_time,
+                    "stt_status": self.latest_stt_status,
+                    "stt_detail": self.latest_stt_detail,
+                    "stt_rms": self.latest_stt_rms,
+                    "stt_threshold": self.latest_stt_threshold,
+                    "speech_text": self.latest_speech_text,
+                    "speech_status": self.latest_speech_status
                 }
             }
 
@@ -709,4 +727,33 @@ class RobotApiNode(Node):
         msg.data = payload
         self.voice_record_cmd_pub.publish(msg)
         self.get_logger().info(f"Published record place command: '{payload}'")
+
+    def voice_stt_status_callback(self, msg: String):
+        import json
+        try:
+            data = json.loads(msg.data)
+            status = data.get("status")
+            detail = data.get("detail", "")
+            rms = data.get("rms", 0.0)
+            threshold = data.get("threshold", 0.0)
+            
+            with self._lock:
+                self.latest_stt_status = status
+                self.latest_stt_detail = detail
+                self.latest_stt_rms = rms
+                self.latest_stt_threshold = threshold
+                self.latest_voice_update_time = time.time()
+                
+                # 记录最后识别到的音频文本
+                if status in ("final_text", "ignored_no_wake_word", "wake_detected"):
+                    self.latest_speech_text = detail
+                    self.latest_speech_status = status
+        except Exception as e:
+            self.get_logger().error(f"Error parsing VAD/STT status: {e}")
+
+    def publish_recalibrate_vad(self, active: bool):
+        msg = Bool()
+        msg.data = active
+        self.recalibrate_vad_pub.publish(msg)
+        self.get_logger().info(f"Published VAD recalibration request: {active}")
 

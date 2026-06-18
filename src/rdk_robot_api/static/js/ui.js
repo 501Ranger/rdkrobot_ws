@@ -56,8 +56,23 @@ function initSidebarTabs() {
     const navItems = document.querySelectorAll(".nav-item");
     const viewPanes = document.querySelectorAll(".view-pane");
 
-    // 获取本地记忆的激活视图，默认为 cockpit
-    const savedView = localStorage.getItem("active-view-pane") || "view-cockpit";
+    // 获取 URL 参数 ?view=view-xxxx
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramView = urlParams.get("view");
+
+    // 获取本地记忆的激活视图，如果 URL 中有 view 参数则优先使用
+    let savedView = paramView || localStorage.getItem("active-view-pane") || "view-cockpit";
+
+    if (paramView) {
+        localStorage.setItem("active-view-pane", paramView);
+        // 清理 URL 参数，避免刷新时强制跳回该选项卡
+        try {
+            const newUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+        } catch (e) {
+            console.error("Failed to clean url params:", e);
+        }
+    }
 
     // 渲染初始化激活状态
     navItems.forEach(item => {

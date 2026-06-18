@@ -11,24 +11,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // 初始化语音模块
 function initVoiceModule() {
-    // 1. 绑定声源定位模拟器滑动条显示数值
-    const angleInput = document.getElementById("ssl-angle-input");
-    const angleVal = document.getElementById("ssl-angle-val");
-    if (angleInput && angleVal) {
-        angleInput.addEventListener("input", () => {
-            angleVal.innerText = `${angleInput.value}°`;
-        });
-    }
-
-    const confInput = document.getElementById("ssl-confidence-input");
-    const confVal = document.getElementById("ssl-confidence-val");
-    if (confInput && confVal) {
-        confInput.addEventListener("input", () => {
-            const val = (parseFloat(confInput.value) / 100).toFixed(2);
-            confVal.innerText = val;
-        });
-    }
-
     // 2. 绑定动作按钮事件
     // A. 模拟语音指令发送
     const btnCmdSend = document.getElementById("btn-voice-command-send");
@@ -58,14 +40,10 @@ function initVoiceModule() {
         });
     }
 
-    // C. 模拟声源定位事件
-    const btnSslSim = document.getElementById("btn-ssl-simulate");
-    if (btnSslSim) {
-        btnSslSim.addEventListener("click", () => {
-            const angle = parseFloat(angleInput.value);
-            const confidence = parseFloat(confInput.value) / 100;
-            simulateSoundSource(angle, confidence);
-        });
+    // C. 自动校准环境噪音门限
+    const btnRecalibrate = document.getElementById("btn-recalibrate-vad");
+    if (btnRecalibrate) {
+        btnRecalibrate.addEventListener("click", recalibrateVAD);
     }
 
     // D. 刷新地标导航配置
@@ -128,20 +106,18 @@ function triggerTTS(text) {
     });
 }
 
-// 模拟发送声源定位事件
-function simulateSoundSource(angle, confidence) {
-    showToast(`正在发送声源事件: 角度 ${angle}°, 置信度 ${confidence}...`, "info");
-    fetch(`${API_BASE}/api/v1/voice/source_event/simulate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ angle: angle, confidence: confidence })
+// 重新校准 VAD 噪声阈值
+function recalibrateVAD() {
+    showToast("正在请求重新校准环境噪声阈值...", "info");
+    fetch(`${API_BASE}/api/v1/voice/recalibrate`, {
+        method: "POST"
     })
     .then(res => {
-        if (!res.ok) throw new Error("模拟声源事件失败");
+        if (!res.ok) throw new Error("发送校准请求失败");
         return res.json();
     })
     .then(data => {
-        showToast(`声源定位模拟事件发送成功!`, "success");
+        showToast("环境噪声自学习校准指令已发送，请保持环境静默 1.5 秒...", "success");
     })
     .catch(err => {
         showToast(err.message, "error");
@@ -264,15 +240,65 @@ function saveVoicePlace() {
 function updateVoiceUI(status) {
     if (!status) return;
 
-    // 最新识别指令
-    const cmdEl = document.getElementById("voice-status-cmd");
-    if (cmdEl) cmdEl.innerText = status.latest_command_text || "--";
-
-    // 指令来源
-    const srcEl = document.getElementById("voice-status-src");
-    if (srcEl) {
-        srcEl.innerText = status.latest_command_source ? status.latest_command_source.toUpperCase() : "--";
+    // 实时语音识别文本显示 (STT)
+    const speechEl = document.getElementById("voice-status-speech");
+    const badgeEl = document.getElementById("voice-status-wake-badge");
+    if (speechEl) {
+        speechEl.innerText = status.speech_text || "--";
     }
+    if (badgeEl) {
+        if (status.speech_status === "final_text") {
+            badgeEl.innerText = "唤醒并触发";
+            badgeEl.style.display = "inline-block";
+            badgeEl.style.background = "rgba(0, 255, 128, 0.15)";
+            badgeEl.style.color = "var(--accent-green)";
+            badgeEl.style.border = "1px solid var(--accent-green)";
+        } else if (status.speech_status === "wake_detected") {
+            badgeEl.innerText = "唤醒成功";
+            badgeEl.style.display = "inline-block";
+            badgeEl.style.background = "rgba(0, 216, 255, 0.15)";
+            badgeEl.style.color = "var(--accent-cyan)";
+            badgeEl.style.border = "1px solid var(--accent-cyan)";
+        } else if (status.speech_status === "ignored_no_wake_word") {
+            badgeEl.innerText = "未唤醒";
+            badgeEl.style.display = "inline-block";
+            badgeEl.style.background = "rgba(255, 255, 255, 0.05)";
+            badgeEl.style.color = "var(--text-secondary)";
+            badgeEl.style.border = "1px solid var(--border-color)";
+        } else {
+            badgeEl.style.display = "none";
+        }
+    }
+
+    // 语音中枢 VAD 状态中文友好说明显示
+    const vadStateEl = document.getElementById("voice-status-vad-state");
+    if (vadStateEl) {
+        const stateMap = {
+            "sleeping": "空闲等待",
+            "calibrating": "噪声校准中...",
+            "decoding": "语音识别中...",
+            "wake_detected": "唤醒完成",
+            "ignored_tts_active": "忽略 (TTS中)",
+            "ignored_too_short": "忽略 (音频过短)",
+            "ignored_duplicate": "忽略 (指令重复)",
+            "ignored_no_wake_word": "忽略 (未检测到唤醒词)",
+            "final_text": "指令已触发"
+        };
+        vadStateEl.innerText = stateMap[status.stt_status] || status.stt_status || "--";
+    }
+
+    // 更新实时 RMS 能量和 VAD 噪声门限显示
+    const rmsEl = document.getElementById("voice-status-rms");
+    const rmsBar = document.getElementById("voice-rms-bar");
+    if (rmsEl) rmsEl.innerText = (status.stt_rms || 0.0).toFixed(1);
+    if (rmsBar) {
+        const maxRmsLimit = 500.0; // 音频输入能量假定的常规最大标尺
+        const pct = Math.min(100, ((status.stt_rms || 0.0) / maxRmsLimit) * 100);
+        rmsBar.style.width = `${pct}%`;
+    }
+
+    const thresholdEl = document.getElementById("voice-status-threshold");
+    if (thresholdEl) thresholdEl.innerText = (status.stt_threshold || 0.0).toFixed(1);
 
     // 指令更新时间
     const timeEl = document.getElementById("voice-status-time");
@@ -286,19 +312,19 @@ function updateVoiceUI(status) {
     const ttsEl = document.getElementById("voice-status-tts");
     if (ttsEl) ttsEl.innerText = status.latest_tts_text || "--";
 
-    // 声源定位测角
+    // 声源定位测角与置信度保持展示（展示物理硬件值）
     const angleEl = document.getElementById("voice-status-angle");
     if (angleEl) {
         const val = status.source_angle !== undefined ? status.source_angle.toFixed(1) : "0.0";
         angleEl.innerText = `${val}°`;
     }
 
-    // 声源定位置信度
     const confEl = document.getElementById("voice-status-conf");
     if (confEl) {
         const val = status.source_confidence !== undefined ? status.source_confidence.toFixed(2) : "0.00";
         confEl.innerText = val;
     }
+
     // 语音指令可能在 ROS 节点内直接更新 places.yaml，状态推送时做节流刷新。
     const placesTable = document.getElementById("voice-places-table-body");
     const now = Date.now();
@@ -306,7 +332,6 @@ function updateVoiceUI(status) {
         lastVoicePlacesRefreshAt = now;
         refreshVoicePlaces();
     }
-
 }
 
 // 暴露到全局 window 作用域，以便 websocket.js 能够跨文件调用

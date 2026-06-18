@@ -194,6 +194,7 @@ async def broadcast_status_loop():
                     "patrol_completed": completed_triggered,
                     "patrol_interrupted": interrupted_reason,
                     "realtime_map": status_dict["realtime_map"],
+                    "voice_status": status_dict.get("voice_status"),
                     "system_logs": system_logs
                 }
                 await manager.broadcast(status_data)

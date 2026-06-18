@@ -113,3 +113,15 @@ def add_voice_place(payload: PlacePayload):
         return {"status": "success", "message": f"Sent coordinate save command for '{payload.name}' to voice node"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send coordinate save command: {e}")
+
+@router.post("/recalibrate")
+def recalibrate_vad():
+    """触发下位机语音模块重新校准环境噪声门限"""
+    if not rn.ros_node:
+        raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
+    try:
+        rn.ros_node.publish_recalibrate_vad(True)
+        return {"status": "success", "message": "Successfully sent VAD recalibration request"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to recalibrate VAD: {e}")
+

@@ -707,36 +707,32 @@
                                 </div>
                             </div>
                             
-                            <!-- 声源定位模拟器 -->
+                            <!-- 🎙️ 麦克风与环境噪声控制 -->
                             <div class="card glass-card">
                                 <div class="card-header">
-                                    <h2>🔊 声源定位（SSL）模拟器</h2>
+                                    <h2>🎙️ 麦克风与环境噪声控制</h2>
                                 </div>
                                 <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 10px;">
-                                    <p class="section-desc" style="font-size: 0.72rem; margin: 0; line-height: 1.4;">在没有物理麦克风阵列硬件时，可以通过下面滑杆模拟声源方向，测试机器人的“听声辨位”转头跟随机能。</p>
+                                    <p class="section-desc" style="font-size: 0.72rem; margin: 0; line-height: 1.4;">语音中枢支持动态环境噪声校准。点击下方校准按钮，小车将静默采集 1.5 秒环境噪音，自动计算并设定最适合当前房间的最佳 VAD 门限。</p>
                                     
+                                    <!-- 实时 RMS 噪声能量显示 -->
                                     <div class="form-row" style="margin: 0;">
                                         <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">
-                                            <span>声源角度 (度)</span>
-                                            <span id="ssl-angle-val" style="color: var(--accent-cyan); font-weight: bold; font-family: 'Orbitron', sans-serif;">0°</span>
+                                            <span>当前输入音频能量 (RMS)</span>
+                                            <span id="voice-status-rms" style="color: var(--accent-cyan); font-weight: bold; font-family: 'Orbitron', sans-serif;">0.0</span>
                                         </div>
-                                        <input type="range" id="ssl-angle-input" min="-180" max="180" value="0" style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; outline: none; transition: var(--transition);">
-                                        <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); margin-top: 2px;">
-                                            <span>-180° (后方)</span>
-                                            <span>0° (正前)</span>
-                                            <span>180° (后方)</span>
+                                        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; position: relative;">
+                                            <div id="voice-rms-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent-green), var(--accent-orange)); transition: width 0.1s ease;"></div>
                                         </div>
                                     </div>
                                     
-                                    <div class="form-row" style="margin: 0;">
-                                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 4px;">
-                                            <span>置信度</span>
-                                            <span id="ssl-confidence-val" style="color: var(--accent-cyan); font-weight: bold; font-family: 'Orbitron', sans-serif;">1.00</span>
-                                        </div>
-                                        <input type="range" id="ssl-confidence-input" min="0" max="100" value="100" style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; outline: none; transition: var(--transition);">
+                                    <!-- 噪声门限值显示 -->
+                                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: var(--border-radius-sm); border: 1px solid var(--border-color);">
+                                        <span style="color: var(--text-secondary);">当前 VAD 噪声门限阈值</span>
+                                        <span id="voice-status-threshold" style="color: var(--accent-orange); font-weight: bold; font-family: 'Orbitron', sans-serif; font-size: 0.9rem;">0.0</span>
                                     </div>
                                     
-                                    <button class="btn btn-warning btn-block" id="btn-ssl-simulate" style="margin-top: 4px; height: 36px; font-size: 0.85rem;">🔊 模拟发生定位事件</button>
+                                    <button class="btn btn-warning btn-block" id="btn-recalibrate-vad" style="margin-top: 4px; height: 36px; font-size: 0.85rem;">🔄 自动校准环境噪音门限</button>
                                 </div>
                             </div>
                         </div>
@@ -751,10 +747,13 @@
                                 </div>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-top: 10px;">
                                     <div class="stat-box glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 10px; background: rgba(255,255,255,0.02);">
-                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">最新识别指令</span>
-                                        <div id="voice-status-cmd" style="font-size: 0.95rem; font-weight: 600; color: var(--accent-cyan); word-break: break-all;">--</div>
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">最新实时语音识别 (STT)</span>
+                                        <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0 2px 0;">
+                                            <div id="voice-status-speech" style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); word-break: break-all;">--</div>
+                                            <span id="voice-status-wake-badge" class="badge" style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; display: none; font-weight: bold;"></span>
+                                        </div>
                                         <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); margin-top: 2px;">
-                                            <span>指令来源: <span id="voice-status-src">--</span></span>
+                                            <span>当前状态: <span id="voice-status-vad-state">--</span></span>
                                             <span>更新时间: <span id="voice-status-time">--</span></span>
                                         </div>
                                     </div>

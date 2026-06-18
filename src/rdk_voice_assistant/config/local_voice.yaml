@@ -25,6 +25,9 @@ local_stt_node:
     max_audio_queue_chunks: 80
     min_text_length: 2
     bypass_words: '开,关,停,去,走'
+    enable_noise_filter: true
+    noise_blacklist: 'yeah,ok,yes,no,oh,eh,ah,um,uh,hi,hello,哦,呃,啊,呀,吧,哈,嗯'
+    english_word_whitelist: 'go,stop,dock,map,slam'
     # Sherpa-ONNX SenseVoice ASR configurations (offline high-accuracy)
     asr_engine: 'sherpa-onnx'
     sherpa_onnx_asr_model: '~/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'

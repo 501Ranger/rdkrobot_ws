@@ -55,6 +55,9 @@ class LocalSttNode(Node):
         self.declare_parameter('max_audio_queue_chunks', 80)
         self.declare_parameter('min_text_length', 2)
         self.declare_parameter('bypass_words', '开,关,停,去,走')
+        self.declare_parameter('enable_noise_filter', True)
+        self.declare_parameter('noise_blacklist', 'yeah,ok,yes,no,oh,eh,ah,um,uh,hi,hello,哦,呃,啊,呀,吧,哈,嗯')
+        self.declare_parameter('english_word_whitelist', 'go,stop,dock,map,slam')
 
         # Sherpa-ONNX SenseVoice ASR configurations
         self.declare_parameter('asr_engine', 'sherpa-onnx')
@@ -846,6 +849,29 @@ class LocalSttNode(Node):
 
         if not text:
             return
+
+        # Multi-level noise and hallucination filtering
+        enable_noise_filter = bool(self.get_parameter('enable_noise_filter').value)
+        if enable_noise_filter:
+            clean_text = text.lower().strip('.,!? ')
+            
+            # 1. 黑名单语气词过滤 (Blacklist)
+            noise_blacklist_str = str(self.get_parameter('noise_blacklist').value)
+            noise_blacklist = [w.strip().lower() for w in noise_blacklist_str.split(',') if w.strip()]
+            if clean_text in noise_blacklist:
+                self.get_logger().info(f'Discarded STT noise/hallucination word: {text}')
+                self._publish_stt_status('ignored_too_short', text, 0.0, self.calibrated_threshold)
+                return
+
+            # 2. 单个未授权英文单词过滤 (Single English Word)
+            import re
+            if re.match(r'^[a-zA-Z]+$', clean_text):
+                whitelist_str = str(self.get_parameter('english_word_whitelist').value)
+                english_word_whitelist = [w.strip().lower() for w in whitelist_str.split(',') if w.strip()]
+                if clean_text not in english_word_whitelist:
+                    self.get_logger().info(f'Discarded single English noise word: {text}')
+                    self._publish_stt_status('ignored_too_short', text, 0.0, self.calibrated_threshold)
+                    return
 
         # Short text filtering (noise reduction)
         min_len = int(self.get_parameter('min_text_length').value)

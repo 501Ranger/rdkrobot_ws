@@ -5,7 +5,7 @@ import yaml
 import subprocess
 import glob
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 
 from .. import ros_node as rn
 from .. import manager as m
@@ -24,13 +24,10 @@ def read_index():
         return FileResponse(index_path)
     raise HTTPException(status_code=404, detail=f"index.html not found in {static_dir}")
 
-@router.get("/voice", response_class=HTMLResponse)
+@router.get("/voice")
 def read_voice():
-    """返回独立的语音助手交互控制台"""
-    voice_path = os.path.join(static_dir, "voice.html")
-    if os.path.exists(voice_path):
-        return FileResponse(voice_path)
-    raise HTTPException(status_code=404, detail=f"voice.html not found in {static_dir}")
+    """重定向到主页的语音助手控制舱"""
+    return RedirectResponse(url="/?view=view-voice")
 
 
 @router.websocket("/ws/status")
@@ -93,6 +90,7 @@ def get_robot_status():
         "base_running": base_running,
         "lidar_running": lidar_running,
         "nav2_plan": status_dict["nav2_path"],
+        "voice_status": status_dict.get("voice_status"),
         "agent_port": agent_port,
         "lidar_port": lidar_port
     }

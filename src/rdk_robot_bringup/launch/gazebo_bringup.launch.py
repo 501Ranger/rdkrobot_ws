@@ -84,6 +84,14 @@ def generate_launch_description():
         output='screen',
     )
 
+    patrol_node = Node(
+        package='rdk_robot_core',
+        executable='patrol',
+        name='patrol_node',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
+    )
+
     return LaunchDescription([
         declare_urdf,
         declare_world,
@@ -93,4 +101,6 @@ def generate_launch_description():
         gazebo_launch,
         robot_state_publisher_node,
         spawn_entity_node,
+        patrol_node,
     ])
+

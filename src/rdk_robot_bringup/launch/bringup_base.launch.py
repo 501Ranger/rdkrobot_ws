@@ -54,9 +54,19 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
+    patrol_node = Node(
+        package='rdk_robot_core',
+        executable='patrol',
+        name='patrol_node',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
+    )
+
     return LaunchDescription([
         declare_use_sim_time,
         robot_state_publisher_node,
         joint_state_publisher_node,
         odom_tf_node,
+        patrol_node,
     ])
+

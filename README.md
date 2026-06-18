@@ -1,254 +1,138 @@
-# RDK Robot Workspace (上位机)
+# RDK Robot 建图导航机器人 (基于 ROS 2 Humble)
 
-这是一个基于 ROS 2 的建图与导航上位机工程，集成了雷达驱动、自主探索建图以及 Nav2 导航堆栈，运行在 RDK X5 板卡上面。本项目基于 ROS 2 Humble。
+本项目是运行在 RDK X5 智能小车嵌入式板卡上的上位机 ROS 2 机器人系统。它以 **ROS 2 Humble** 作为核心运行框架，实现雷达驱动、物理建模、SLAM 建图、自主边界探索、Nav2 智能导航与多点巡逻。同时提供了一个轻量级的 Web 网页人机交互界面 (HMI)，作为辅助调试和状态监控工具。
 
 对应的下位机 (ESP32) 驱动代码请参考：[esp32-micro-ros-driver](https://github.com/501Ranger/esp32-micro-ros-driver)
 
-## 📁 项目结构
+---
+
+## 📁 1. 项目结构
 
 ```text
-rdkrobot_ws/src/
-├── rdk_robot_bringup/     # 核心启动包：包含 URDF 模型、Launch 脚本和配置文件（Nav2, Slam Toolbox）。
-├── rdk_robot_core/        # 核心 C++ 节点：包含高频 TF 广播器 (odom_tf_broadcaster) 与巡逻节点 (patrol)。
-├── rdk_robot_apps/        # Python 应用包：包含自动全局定位脚本 (auto_localize)。
-├── LSLIDAR_X_ROS2/        # 镭神（LSLIDAR）系列激光雷达驱动，主要支持 n10p 等型号。
-└── m-explore-ros2/        # 自主探索包：用于实现自动边界探索建图 (包含 explore 和 map_merge)。
+rdkrobot_ws/
+├── src/                   # 源码目录
+│   ├── rdk_robot_bringup/ # 核心启动包：包含 URDF 模型、Launch 脚本和配置文件（Nav2, Slam Toolbox）。
+│   ├── rdk_robot_api/     # 辅助 API 包：提供 FastAPI 接口与 HMI 网页，作为辅助交互和监控工具。
+│   ├── rdk_robot_core/    # 核心 C++ 节点：包含高频 TF 广播器 (odom_tf_broadcaster) 与巡逻节点 (patrol)。
+│   ├── rdk_robot_apps/    # Python 应用包：包含自动全局定位脚本 (auto_localize)。
+│   ├── LSLIDAR_X_ROS2/    # 镭神（LSLIDAR）系列激光雷达驱动，主要支持 n10p 等型号。
+│   └── m-explore-ros2/    # 自主探索包：用于实现自动边界探索建图 (包含 explore 和 map_merge)。
+├── maps/                  # 历史保存的 2D 栅格地图数据库（包含 .yaml 地图信息及自定义语义点）。
+└── scripts/               # 辅助转换工具、一键依赖安装、一键交叉编译与同步部署脚本。
 ```
-
-## ✨ 功能特性
-
-*   **全方位硬件驱动：** 适配镭神 N10P 雷达并与基于 ESP32 的微型下位机 (micro-ROS) 完美协同。
-*   **SLAM建图与导航：** 集成了 slam_toolbox (建图) 和 nav2 (导航)。
-*   **自主探索 (Auto-mapping)：** 支持基于前沿点的自动建图和多地图融合。
-*   **仿真支持：** 包含一键式的 Gazebo 仿真环境与相应的 URDF 模型。
 
 ---
 
-## 🚀 详细使用教程
+## 🛠️ 2. 环境准备与编译
 
-### 1. 一键安装依赖包
+### 2.1 依赖安装
 
-在编译运行项目前，请确保已经安装了 ROS2 Humble 及必要的构建工具。可通过以下命令一键安装所有缺少的 ROS 依赖项：
+在编译运行项目前，请确保系统已安装 ROS 2 Humble 并激活了环境变量。
+
+项目提供了一键依赖环境检测与安装脚本，能够**自动检测本地系统包、rosdep 数据库及 Python 依赖库是否完整，并在缺失时进行增量安装**：
 
 ```bash
-# 进入工作空间目录
-cd ~/rdkrobot_ws
-
-# 更新 apt 包索引
-sudo apt update
-
-# 安装常用工具（如未安装）
-sudo apt install -y python3-rosdep python3-colcon-common-extensions
-
-# 初始化并更新 rosdep (如果未初始化过)
-sudo rosdep init
-rosdep update
-
-# 一键安装所有需要的依赖包
-rosdep install -i --from-path src --rosdistro humble -y
+# 运行一键依赖检测与安装
+bash scripts/install_dependencies.sh
 ```
 
-### 2. 编译与环境设置
+### 2.2 编译工作空间
+
+在工作空间根目录下，使用 `colcon` 进行编译。
+
+*   **全量编译工作空间**：
+    ```bash
+    colcon build --symlink-install
+    ```
+
+### 2.3 环境变量激活
+
+在每次开启新的终端或运行节点前，必须确保正确激活了 ROS 2 的系统环境变量和当前工作空间的环境变量：
 
 ```bash
-# 编译整个工作空间
-colcon build --symlink-install
+# 1. 激活 ROS 2 Humble 系统环境变量
+source /opt/ros/humble/setup.bash
 
-# 激活环境 (建议将其加入到 ~/.bashrc)
+# 2. 激活当前工作空间的编译产物环境变量
 source install/setup.bash
 ```
 
-### 3. 连接下位机 (micro-ROS)
+### 2.4 开发机交叉编译与部署 (PC -> RDK X5)
 
-下位机通过 micro-ROS 接入 ROS2 网络，支持串口 (USB) 和 UDP (WiFi) 两种连接方式。建议通过 Docker 运行 micro-ROS-Agent 来建立通信：
+为了方便在更高性能的主机（PC）上开发和编译，并通过网络快速同步到 RDK X5 嵌入式板卡，项目提供了交叉编译与推送部署工具链：
 
-**方法 A: 通过串口/USB 连接**
-```bash
-docker run -it --rm -v /dev:/dev --privileged microros/micro-ros-agent:humble serial --dev /dev/ttyACM0 -b 921600 -v6
-```
-*(注意：请根据实际情况确认下位机串口号，如 `/dev/ttyUSB0` 或 `/dev/ttyACM0`)*
+1. **开发机交叉编译 (PC)**：在开发机（Ubuntu/x86_64）上，可以通过 Docker 容器与 QEMU 模拟环境，编译出适用于 ARM64 架构的 ROS 2 产物，避免板卡编译性能不足的问题：
+   * **智能增量编译**：`build_arm64.sh` 会自动分析 Git 工作区与 commit 变更，仅对发生改动的功能包执行增量构建（支持 `-f` 参数强制全量编译），大幅节省编译耗时。
+   ```bash
+   # 执行增量交叉编译脚本
+   bash scripts/build_arm64.sh
+   ```
+   编译完成后，产物将生成在工作空间根目录下的 `install_arm64/` 中。
 
-**方法 B: 通过 UDP/WiFi 连接**
-```bash
-docker run -it --rm --net=host microros/micro-ros-agent:humble udp4 --port 8888
-```
+2. **一键推送部署到板卡 (PC -> RDK X5)**：可通过 `rsync` 增量同步（或 `scp` 全量复制）将交叉编译出的 `install_arm64/` 推送到板卡上：
+   * **自动配置记忆**：首次运行会引导输入配置并持久化写入隐藏文件 `.deploy_config` ，后续运行一键读取，支持 `--reset` 重置。
+   * **一键免密配对**：自适应诊断免密连接状态，引导一键安装分发 SSH 公钥，配置后实现全自动零密码部署。
+   ```bash
+   # 启动推送部署脚本
+   bash scripts/deploy_arm64.sh
+   ```
 
-### 4. 镭神 N10P 激光雷达配置与运行
+---
 
-本项目使用的雷达是**镭神 N10P**，配置文件位于：
-`src/LSLIDAR_X_ROS2/src/lslidar_driver/params/lidar_uart_ros2/lsn10p.yaml`
+## 🚀 3. 运行与启动
 
-**需要关注修改的关键参数：**
-*   `serial_port_`: 必须修改为您雷达实际插入的串口号（例如 `/dev/ttyACM0` 或自定义的别名）。
-*   `frame_id`: 默认为 `laser_frame`，须与 TF 树中的雷达坐标系名称一致。
-*   `scan_topic`: 默认为 `/scan`。
+项目的核心底盘驱动、SLAM 建图、及 Nav2 导航底座任务，均通过 `rdk_robot_bringup` 包中的一系列 Launch 启动脚本拉起。
 
-*(提示：您可以通过运行 `sudo bash src/LSLIDAR_X_ROS2/src/wheeltec_udev.sh` 脚本来绑定串口设备别名并赋予权限。)*
+详细的 Launch 脚本说明（包含 12 个 launch 脚本在实机运行、Gazebo 仿真及 RViz2 调试下的具体用法）请参见：👉 **[rdk_robot_bringup 启动包说明文档](src/rdk_robot_bringup/README.md)**
 
-**启动雷达节点：**
-```bash
-ros2 launch lslidar_driver lsn10p_launch.py
-```
-*(或使用 launch 整合文件直接随 bringup 启动)*
+### 3.1 一键启动
 
-### 5. 常用命令 (启动与运行)
-
-#### 启动建图 (SLAM)
-```bash
-# 启动基础驱动 + 激光雷达 + SLAM
-ros2 launch rdk_robot_bringup slam.launch.py
-
-# 启动包含所有组件的 SLAM
-ros2 launch rdk_robot_bringup slam_all_in_one.launch.py
-```
-
-#### 保存地图 (完成建图后)
-建图完成后，使用以下命令将地图保存至 `maps` 文件夹：
-```bash
-ros2 run nav2_map_server map_saver_cli -f ~/rdkrobot_ws/maps/my_map
-```
-*(这会在 `~/rdkrobot_ws/maps/` 目录下生成 `my_map.pgm` 和 `my_map.yaml` 两个文件。)*
-
-#### 启动导航 (Navigation)
-
-##### 方法 A: 边建图边导航 (SLAM Toolbox Online Navigation)
-```bash
-# 启动 SLAM (提供定位和地图更新)
-ros2 launch rdk_robot_bringup slam.launch.py
-
-# 在另一个终端启动 Nav2 导航
-ros2 launch rdk_robot_bringup navigation.launch.py
-```
-
-##### 方法 B: 使用已保存的静态地图进行导航 (AMCL 定位)
-*   **仿真环境 (Gazebo)**：
-    ```bash
-    # 启动 Gazebo 仿真 + 静态地图加载 + AMCL 定位 + Nav2 导航
-    ros2 launch rdk_robot_bringup sim_nav_with_map.launch.py
-    ```
-    *(提示：默认加载包内的 `my_map.yaml`。若要指定其他地图路径，可传参 `map:=/path/to/your/map.yaml`)*
-*   **真实机器人**：
-    已将底盘启动、雷达驱动和带有静态地图加载的定位/导航集成到了 `nav_with_map.launch.py`：
-    ```bash
-    # 一键启动底盘驱动 + 雷达驱动 + 静态地图加载 (AMCL) + Nav2 导航
-    ros2 launch rdk_robot_bringup nav_with_map.launch.py
-    ```
-    *(提示：默认加载包内自带的 `my_map.yaml`。若要载入其他地图，可以传参 `map:=/path/to/other_map.yaml`；若需要自动全局重定位，可以传入 `auto_localize:=true`)*
-
-#### 自动化/仿真
-> **注意**：默认仿真环境使用的是 `turtlebot3_gazebo` 中的 `turtlebot3_world.world`，请确保系统中已安装该包（例如通过 `sudo apt install ros-humble-turtlebot3-gazebo`）。
+本项目的 ROS 2 守护服务和辅助 Web 交互服务可通过以下 Launch 文件一键拉起（会自动拉起雷达、底盘、以及 FastAPI 服务）：
 
 ```bash
-# 启动仿真环境下的自主建图 (默认加载 turtlebot3_world 场景)
-ros2 launch rdk_robot_bringup sim_auto_mapping.launch.py
-
-# 启动 Gazebo 仿真环境 + SLAM 建图 + Nav2 导航
-ros2 launch rdk_robot_bringup sim_slam_nav.launch.py
-
-# 启动 Gazebo 仿真环境
-ros2 launch rdk_robot_bringup gazebo_bringup.launch.py
-```
-
-## 🖥️ 网页控制舱与 Web API 服务 (HMI Dashboard)
-
-本项目集成了内置的 **FastAPI** 上位机服务，并在 `http://<小车IP>:8000/` 托管了响应式且功能完备的**网页控制舱 (Web Dashboard)**。
-
-### 1. 项目结构扩展
-
-*   `src/rdk_robot_api/`：上位机 API 服务包。
-    *   `rdk_robot_api/main.py`：基于 FastAPI 的主服务节点，挂载静态文件目录，实现 ROS 2 守护线程与接口转换。
-    *   `rdk_robot_api/scheduler.py`：基于 JSON 持久化存储的定时巡逻调度管理模块。
-    *   `static/`：网页 HMI 静态资源，包括 HTML (`index.html`)、样式表 (`css/style.css`)、页面逻辑 (`js/app.js`)。
-
-### 2. 核心功能特性
-
-*   **实时数据看板与心跳检测**：实时呈现小车的电池状态、位姿坐标 ($X, Y$ 坐标、Yaw 航向角) 以及导航当前状态（IDLE, NAVIGATING, REACHED, FAILED, CANCELED）。内置**下位机（MCU）心跳检测**，基于雷达/里程计/电池话题接收时差，在头部栏以红/绿指示灯动态呈现小车在线状态。
-*   **双轨状态通信（10Hz WebSocket + HTTP 容错轮询）**：状态推送全面重构为基于 10Hz WebSocket 的高频广播（提供极其流畅的实时位置更新与界面响应）。同时设计了**自动降级容错机制**，在 WebSocket 因网络或代理受限中断时自动切换为 1.5 秒/次的 HTTP 轮询模式，确保 HMI 绝对不卡死。
-*   **多航点规划与移动端物理排序（▲ / ▼）**：支持在地图上直接连续点击取点。航点列表除了支持 PC 端原生的 HTML5 拖拽排序外，专为移动端触屏新增了上移（▲）和下移（▼）物理按键，保证在任意手机与平板上 100% 可用。
-*   **历史地图预览网格与管理**：在底部集成了历史地图预览卡片网格，动态加载预览缩略图，支持在前端一键加载选中地图至导航系统，或彻底物理删除旧地图（同步清理 `.yaml`、`.pgm` 和关联的语义 `.json`）。
-*   **手机/移动端网页自适应适配**：精心设计响应式网页布局，在窄屏/手机端自动由双栏转换为垂直单栏排版。利用 CSS `display: contents` 打破原有的 HTML 列嵌套限制，按移动端操作优先级重新排列卡片（Telemetry与地图优先）。优化状态栏、多列坐标格布局，将控制指令按钮网格化（2x2）以适应手指触控。
-*   **多轨路径与轨迹实时绘制 (SVG Overlay)**：
-    *   **实时历史轨迹**：支持高精度记录小车行进轨迹，采用移动位移阈值防抖（>3cm 记录一次），可通过右上角工具栏一键开启/隐藏（👣）和一键清空（🧹）。
-    *   **Nav2 规划路径展示**：在下发导航指令后，从 ROS 2 的 `/plan` 话题接收经过 150 点降采样优化的全局规划路径，在地图上以深紫色实线高亮重绘，导航到达/中止后自动清除。
-    *   **多航点规划路线**：显示带 1, 2, 3 数字标号的青色圆圈标记点，并用青色实线指引。
-    *   **自适应逆向缩放 (Inverse Scale)**：地图上小车 marker、规划点标记圆圈、编号字号等所有 overlay 元素均根据 `1.0 / zoomScale` 进行自适应逆向缩放，在地图任意放大或缩小时，其屏幕像素大小绝对恒定不变，清爽美观。
-*   **交互式地图缩放与平移 (Zoom & Pan)**：
-    *   **手势与滚轮**：加载地图后支持通过鼠标滚轮进行 `0.4x - 5.0x` 无缝缩放，按住鼠标左键可对地图进行任意拖动平移。
-    *   **移动端单指平移与防误触**：支持在手机端用单指触摸滑动进行平滑平移，且滑动位移超过 5 像素时自动屏蔽地图的点击取点事件，避免移动地图时误触发取点或导航。
-    *   **快捷工具栏**：地图右上角集成了放大 (`➕`)、缩小 (`➖`)、恢复原位 (`🏠`)、小车轨迹显示切换 (`👣`) 以及清空轨迹 (`🧹`) 悬浮控制按钮。
-*   **一键模式协调与自动重定位**：支持在网页端一键开关 SLAM 建图，一键自主探索建图，以及输入名称直接保存地图。并在加载地图后支持 `一键全局重定位` (Auto Relocalize)。
-*   **一键 micro-ROS 串口代理控制**：集成一键启动/关闭 micro-ROS 串口代理按钮（通过后台调用 Docker 容器运行 `microros_agent`），避免每次都在另一终端手动输入复杂的 Docker 串口映射命令。
-*   **自适应界面与防浏览器强缓存**：后台可自动识别当前 CPU 架构，若是嵌入式 ARM 环境则自动隐藏仿真按钮防止误触。此外，后端添加了 HTTP 资源防强缓存中间件，杜绝了由于静态 JS 文件本地缓存导致前端按钮无响应的问题。
-*   **地图无缝点击取点 (坐标变换不变性)**：
-    *   在地图上直接点击任意点，网页会自动利用地图原点和分辨率参数，将点击的像素坐标转换为 ROS 的物理世界坐标并填入导航表单。该映射算法完全基于视口矩形（Bounding Rect）计算，在任意缩放和平移状态下都能保证取点绝对精确！
-*   **语义点 (POI) 标定与点名导航**：可以在网页端为当前地图添加或删除带名称的语义点（如 `kitchen`），并能点击列表旁的 `去这里` 触发 Nav2 动作客户端一键导航至该语义点。
-*   **定时巡逻调度班表**：可视化管理每天特定时刻定时唤醒小车巡逻的班表，配置自动持久化在本地 JSON 文件中。
-
-### 3. 一键启动与运行
-
-确保系统依赖中安装了 `python3-pip` 并通过本地用户空间安装了 API 服务依赖的 `fastapi` 和 `uvicorn` (见 `rdk_robot_api` 配置)。然后启动接口与控制舱：
-
-```bash
-# 启动 API 服务与网页控制舱
+# 启动核心守护节点与辅助 Web 交互服务
 ros2 launch rdk_robot_api api.launch.py
 ```
 
-启动后，在同一局域网的电脑、手机或平板浏览器上访问：
-👉 **`http://<小车IP>:8000/`** (本地访问：`http://localhost:8000/`) 即可进入控制舱。
+服务启动成功后，可在局域网内的电脑或移动端设备上通过浏览器访问辅助 HMI：
+👉 **`http://<小车IP>:8000/`** (本地调试访问: `http://localhost:8000/`)
 
-## 📂 辅助工具与脚本 (`scripts/`)
-工作空间根目录下的 `scripts/` 目录中包含了一套将 2D 栅格地图转换并导入为 Gazebo 三维仿真物理世界的工具链：
+*   **实机底层硬件自动初始化**：在 ARM 实机环境下，API 服务在启动时会自动进行实机底层硬件初始化，实现上电即用。
 
-1. **[fix_gray_walls.py](scripts/fix_gray_walls.py)**：
-   * **作用**：地图噪点清理与二值化。它能将 SLAM 建图或图像旋转产生的暗灰色过渡像素（灰度值 $< 200$）强制设为纯黑色（$0$，表示障碍物/墙体），使墙壁界限分明，并自动备份原图。
-2. **[map2world.py](scripts/map2world.py)**：
-   * **作用**：一键生成三维物理世界。它读取静态地图的 `.yaml` 和 `.pgm`，使用 OpenCV 的膨胀和闭运算连接断裂墙面并去除噪点空洞，再利用 **贪婪网格算法 (Greedy Meshing)** 将相邻墙体像素合并为大矩形方块，最终导出为 Gazebo 的 [hallway.world](src/rdk_robot_bringup/worlds/hallway.world)。
-3. **[test_greedy_mesh.py](scripts/test_greedy_mesh.py)**：
-   * **作用**：合并算法原型测试脚本。用于在不写入世界文件的情况下测试不同图像预处理参数下生成的矩形网格数量，用以评估性能。
+---
 
-### 💡 转换工作流
-建图保存后，若要将地图还原为 Gazebo 仿真世界中的三维墙体，可运行：
-```bash
-# 1. 净化地图墙体（可选）
-python3 scripts/fix_gray_walls.py
+## 🔌 4. ROS 2 物理接口与 Web API
 
-# 2. 从静态地图生成 Gazebo 世界
-python3 scripts/map2world.py
-```
+我们将 Web 端的路由细节和 `RobotApiNode` 的 ROS 2 话题、动作、服务等具体的物理接口规格，收归在 `rdk_robot_api` 功能包中。
 
-## ⚙️ 配置说明
-- **Nav2 参数**: `src/rdk_robot_bringup/config/nav2_params.yaml`
-- **SLAM 参数**: `src/rdk_robot_bringup/config/mapper_params_online_async.yaml`
-- **URDF 模型**: `src/rdk_robot_bringup/urdf/`
+详细的接口规格说明请参见：👉 **[rdk_robot_api 接口与开发文档](src/rdk_robot_api/README.md)**
 
-## 🖥️ 交叉编译与一键部署 (高性能主机 -> RDK X5)
+主要包含：
+*   `RobotApiNode` 订阅的 `/odom`、`/amcl_pose`、`/plan`、`/battery_state` 等话题。
+*   发布的速度控制话题 `/cmd_vel` 和初始位姿 `/initialpose`。
+*   调用的 Nav2 导航动作客户端和地图加载服务客户端。
+*   FastAPI 暴露的 RESTful 路由与 10Hz 状态推送 WebSocket 协议。
 
-当我们需要在高性能的主机（x86_64）上修改代码并编译，然后部署到 RDK X5（ARM64）板卡上时，可以使用本项目提供的基于 Docker + QEMU 的交叉编译与部署工具链。
+---
 
-### 1. 主机编译 (ARM64 架构)
-在主机上执行以下命令进行本地 ARM64 交叉编译：
-```bash
-# 启动交叉编译脚本
-bash scripts/build_arm64.sh
-```
-*提示：该脚本会自动注册 QEMU 模拟环境，通过 Docker 容器内的 `rosdep` 自动解决板卡端的依赖并进行单线程编译，编译产物输出到本地的 `install_arm64/` 中，与主机的 `install/` (x86_64) 隔离。*
+## 🖥️ 5. Web 辅助交互工具功能导览
 
-### 2. 一键同步部署到 RDK X5 板卡
-确保主机与 RDK X5 在同一局域网下，且板卡开启了 SSH 服务。执行以下命令同步编译产物：
-```bash
-# 启动部署脚本
-bash scripts/deploy_arm64.sh
-```
-*提示：脚本会提示您输入 RDK X5 板卡的 IP 地址、SSH 用户名（默认 `sunrise`）及目标工作空间安装路径（默认 `~/rdkrobot_ws/install`），优先通过 `rsync` 增量同步编译产物（若无则退化为 `scp`）。*
+Web 网页端作为机器人的辅助交互工具，提供了直观的图形化调试界面：
 
-### 3. 板卡端环境激活
-同步完成后，在 RDK X5 板卡终端上直接激活即可运行：
-```bash
-source ~/rdkrobot_ws/install/setup.bash
-```
-*(注意：请确保板卡端也安装了机器人运行所需的系统运行时依赖，例如 `ros-humble-slam-toolbox`、`ros-humble-navigation2` 等)*
+### 5.1 📍 导航与多航点任务配置
+*   支持单点目标导航，实时在地图上绘制 Nav2 的规划路径。
+*   支持可视化的多航点列表编辑，可以通过 ▲ / ▼ 物理按钮在移动端对航点进行排序调整，并一键发布执行连续巡逻。
+*   支持保存自定义语义命名点（POI，如 `kitchen`），一键快速直达。
 
-## 🛠️ 开发规范
-- **代码风格**: 遵循 ROS 2 C++ (Ament Lint) 和 Python (PEP8) 规范。
-- **Launch 文件**: 优先使用 Python 编写 Launch 脚本。
-- **坐标系**: 遵循 REP-105 标准（`map` -> `odom` -> `base_link` -> `laser_link`）。
+### 5.2 🎮 键盘与游戏手柄实时监控
+*   支持标准的 XBOX 蓝牙手柄与网页虚拟摇杆，在 WebSocket 链路上以高频双向通信传输底盘控制量，配合中位防抖与限流算法，确保遥控灵敏平稳。
+
+### 5.3 🗺️ 静态栅格地图修剪与重载
+在网页地图编辑模块中，可以通过画笔直观地擦除 SLAM 扫描出的离散噪点（开辟通行区）或绘制黑色虚拟围墙（限制通行）。点击保存后，后端会自动将修改合入 `.pgm` 图形文件并调用 `map_server` 触发 Nav2 无缝重载，无需重启节点。
+
+### 5.4 📊 系统监控、双轨日志与电源管理
+*   **圆形状态仪表盘**：CPU 与内存占用以 SVG 拟态圆形进度条显示，网络上传/下载流量差分统计。
+*   **双轨日志系统**：
+    *   **核心系统事件终端**：开发与调试视图中集成了核心系统事件终端，通过 10Hz WebSocket 实时展示重大系统级日志。支持一键增量清屏，仅展现清空后的最新消息。
+    *   **任务历史日志持久化**：后台多线程劫持单点/巡逻任务生命周期并累加行驶里程落盘持久化（上限 300 条）。前台以拟态看板实时查询日志历史、近 7 日频次直方图、成功率环图，并兼容移动窄屏滑动与流式布局。
+*   **一键安全关机**：在开发面板一键下发免密关机指令，自带 1 秒优雅响应以完全确保安全关闭板卡硬件电源。

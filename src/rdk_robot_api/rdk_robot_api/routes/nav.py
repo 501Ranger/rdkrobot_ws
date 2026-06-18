@@ -5,10 +5,11 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from geometry_msgs.msg import Pose
 from nav2_msgs.action import ComputePathToPose
+from std_srvs.srv import Trigger
 
 from .. import ros_node as rn
 from .. import config
-from ..models import NavGoPayload, TaskPayload
+from ..models import NavGoPayload, TaskPayload, WaypointPayload
 
 router = APIRouter(prefix="/api/v1/nav", tags=["Navigation"])
 
@@ -25,9 +26,9 @@ async def compute_path_segment(ros_node, start_pose, goal_pose) -> list:
         return None
 
     goal_msg = ComputePathToPose.Goal()
-    goal_msg.pose.header.frame_id = 'map'
-    goal_msg.pose.header.stamp = ros_node.get_clock().now().to_msg()
-    goal_msg.pose.pose = goal_pose
+    goal_msg.goal.header.frame_id = 'map'
+    goal_msg.goal.header.stamp = ros_node.get_clock().now().to_msg()
+    goal_msg.goal.pose = goal_pose
 
     if start_pose is not None:
         goal_msg.use_start = True
@@ -40,9 +41,14 @@ async def compute_path_segment(ros_node, start_pose, goal_pose) -> list:
     # 发送目标
     future = ros_node.compute_path_client.send_goal_async(goal_msg)
     
+    import time
     # 异步非阻塞等待目标响应
+    start_time = time.time()
     while not future.done():
         await asyncio.sleep(0.02)
+        if time.time() - start_time > 5.0:
+            ros_node.get_logger().warn("Timeout waiting for ComputePathToPose goal response.")
+            return None
         
     goal_handle = future.result()
     if not goal_handle.accepted:
@@ -51,8 +57,12 @@ async def compute_path_segment(ros_node, start_pose, goal_pose) -> list:
 
     # 异步非阻塞等待结果
     result_future = goal_handle.get_result_async()
+    start_time = time.time()
     while not result_future.done():
         await asyncio.sleep(0.02)
+        if time.time() - start_time > 10.0:
+            ros_node.get_logger().warn("Timeout waiting for ComputePathToPose result.")
+            return None
 
     action_result = result_future.result()
     # status 4 为 SUCCEEDED
@@ -94,7 +104,8 @@ async def preview_patrol_path(payload: TaskPayload):
         poses.append(pose)
 
     # 2. 提取当前机器人位姿作为首段起点
-    curr_pose_dict = rn.ros_node.robot_pose
+    status_data = rn.ros_node.get_robot_status_data()
+    curr_pose_dict = status_data["pose"]
     curr_pose = Pose()
     curr_pose.position.x = curr_pose_dict["x"]
     curr_pose.position.y = curr_pose_dict["y"]
@@ -140,14 +151,27 @@ def trigger_auto_localize():
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
     
     if not rn.ros_node.localize_cli.service_is_ready():
+        # 即使重定位服务不可用，也先发一次初始位姿使 TF 链路恢复
+        rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
         raise HTTPException(
             status_code=503, 
             detail="Auto localization service not available. Make sure auto_localize node is running."
         )
     
+    # 先发初始位姿确保 AMCL TF 链路存在，再触发精细全局搜索重定位
+    rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
     req = Trigger.Request()
     rn.ros_node.localize_cli.call_async(req)
     return {"status": "success", "message": "Trigger request sent to auto_localize node."}
+
+@router.post("/initialpose")
+def set_initial_pose(payload: WaypointPayload):
+    """手动发布初始位姿给 AMCL 定位系统 (类似于 2D Pose Estimate)"""
+    if not rn.ros_node:
+        raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
+    
+    rn.ros_node.publish_initial_pose(x=payload.x, y=payload.y, yaw=payload.yaw)
+    return {"status": "success", "message": f"Initial pose published: x={payload.x:.3f}, y={payload.y:.3f}, yaw={payload.yaw:.2f}"}
 
 @router.get("/auto-localize/status")
 def get_auto_localize_status():

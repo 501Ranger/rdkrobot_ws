@@ -8,6 +8,7 @@ from io import BytesIO
 from datetime import datetime
 from typing import List
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from nav2_msgs.srv import LoadMap
 
@@ -15,6 +16,8 @@ from .. import ros_node as rn
 from .. import manager as m
 from .. import config
 from ..models import POIPayload
+from ..utils import check_docker_container
+import asyncio
 
 router = APIRouter(prefix="/api/v1/maps", tags=["Maps"])
 
@@ -117,7 +120,7 @@ def get_map_image(map_name: str):
     return StreamingResponse(BytesIO(encoded_img.tobytes()), media_type="image/png")
 
 @router.post("/{map_name}/load")
-def load_map_into_navigation(map_name: str):
+async def load_map_into_navigation(map_name: str):
     """动态将指定地图载入 Nav2 导航系统"""
     if not rn.ros_node:
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
@@ -141,11 +144,11 @@ def load_map_into_navigation(map_name: str):
         sim_flag = "true" if use_sim else "false"
         cmd = [
             "bash", "-c",
-            f"source /opt/ros/humble/setup.bash && source /home/ranger/rdkrobot_ws/install/setup.bash && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
+            f"source /opt/ros/humble/setup.bash && source {config.WORKSPACE_SETUP_BASH} && ros2 launch rdk_robot_bringup localization.launch.py use_sim_time:={sim_flag}"
         ]
         try:
             m.loc_process = subprocess.Popen(cmd, preexec_fn=os.setsid)
-            time.sleep(3.0)
+            await asyncio.sleep(3.0)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start localization launch: {e}")
     else:
@@ -159,7 +162,7 @@ def load_map_into_navigation(map_name: str):
         if rn.ros_node.load_map_cli.service_is_ready():
             service_ready = True
             break
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     if not service_ready:
         raise HTTPException(
@@ -176,13 +179,23 @@ def load_map_into_navigation(map_name: str):
     start_time = time.time()
     timeout = 10.0
     while not future.done():
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
         if time.time() - start_time > timeout:
-            raise HTTPException(status_code=504, detail="Timeout waiting for Nav2 map_server to load map")
+            raise HTTPException(status_code=544, detail="Timeout waiting for Nav2 map_server to load map")
             
     res = future.result()
     if res.result == 0:
         config.current_map_name = map_name  # 更新全局当前地图名
+        
+        # 地图加载成功后，自动向 AMCL 发布初始位姿 (0, 0, 0)
+        # 这使 AMCL 立即开始发布 map->odom TF，解除 costmap 的 "map frame not exist" 报错
+        # 实际场景中用户应随后使用"一键全局重定位"来获得精确定位
+        await asyncio.sleep(1.5)  # 等待 AMCL 节点完成激活
+        rn.ros_node.publish_initial_pose(x=0.0, y=0.0, yaw=0.0)
+        rn.ros_node.get_logger().info(
+            f"Map '{map_name}' loaded. Auto-published initial pose (0,0,0) to bootstrap AMCL TF."
+        )
+        
         return {"status": "success", "message": f"Successfully loaded map: {map_name}"}
     else:
         raise HTTPException(status_code=500, detail=f"Map server failed to load map, result code: {res.result}")
@@ -213,3 +226,74 @@ def get_map_pois(map_name: str):
             return json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read POI file: {e}")
+
+class MapEditPayload(BaseModel):
+    image_base64: str
+
+@router.post("/{map_name}/edit")
+def edit_map_file(map_name: str, payload: MapEditPayload):
+    """接收前端 Canvas 涂鸦后的 RGBA 图像，转换为 ROS 8位单通道 PGM 灰度图，并覆盖写入原地图文件"""
+    import base64
+    import numpy as np
+    import cv2
+    
+    # 1. 提取 PGM 物理路径
+    yaml_path = os.path.join(config.MAPS_DIR, f"{map_name}.yaml")
+    if not os.path.exists(yaml_path):
+        raise HTTPException(status_code=404, detail=f"Map '{map_name}' not found.")
+        
+    try:
+        with open(yaml_path, 'r') as f:
+            data = yaml.safe_load(f)
+        image_filename = data.get("image", f"{map_name}.pgm")
+        if os.path.isabs(image_filename):
+            pgm_path = image_filename
+        else:
+            pgm_path = os.path.join(config.MAPS_DIR, image_filename)
+    except Exception:
+        pgm_path = os.path.join(config.MAPS_DIR, f"{map_name}.pgm")
+        
+    # 2. 解码 Base64 图像
+    try:
+        base64_data = payload.image_base64
+        if "," in base64_data:
+            base64_data = base64_data.split(",", 1)[1]
+        img_data = base64.b64decode(base64_data)
+        nparr = np.frombuffer(img_data, np.uint8)
+        img_rgba = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 image data: {e}")
+        
+    if img_rgba is None:
+        raise HTTPException(status_code=400, detail="Failed to decode image data")
+        
+    # 3. 将 RGBA/RGB 转换为单通道 PGM 灰度图 (未知区域=205, 空闲区=254, 障碍物=0)
+    try:
+        height, width = img_rgba.shape[:2]
+        gray_img = np.ones((height, width), dtype=np.uint8) * 205  # 默认 205 (未知)
+        
+        if img_rgba.shape[2] == 4:
+            # 提取通道
+            r, g, b, a = cv2.split(img_rgba)
+            # 灰度转换
+            gray_val = (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
+            
+            # 判定规则：凡是 alpha >= 50 的作为已知区域
+            known_mask = a >= 50
+            free_mask = known_mask & (gray_val > 127)
+            occ_mask = known_mask & (gray_val <= 127)
+            
+            gray_img[free_mask] = 254
+            gray_img[occ_mask] = 0
+        else:
+            gray_val = cv2.cvtColor(img_rgba, cv2.COLOR_BGR2GRAY)
+            gray_img[gray_val > 127] = 254
+            gray_img[gray_val <= 127] = 0
+            
+        # 4. 覆盖原图
+        cv2.imwrite(pgm_path, gray_img)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process and save PGM map: {e}")
+        
+    # 5. 自动重载该地图到导航中
+    return load_map_into_navigation(map_name)

@@ -20,7 +20,14 @@ def generate_launch_description():
         api_share = get_package_share_directory('rdk_robot_api')
         config_path = os.path.join(api_share, 'config', 'robot_params.yaml')
     except Exception:
-        config_path = '/home/ranger/rdkrobot_ws/src/rdk_robot_api/config/robot_params.yaml'
+        try:
+            # 从 lslidar_driver 路径推导工作空间，定位至 src 下的配置文件
+            lidar_share = get_package_share_directory('lslidar_driver')
+            install_dir = os.path.dirname(os.path.dirname(os.path.dirname(lidar_share)))
+            workspace_dir = os.path.dirname(install_dir)
+            config_path = os.path.join(workspace_dir, 'src', 'rdk_robot_api', 'config', 'robot_params.yaml')
+        except Exception:
+            config_path = '/home/ranger/rdkrobot_ws/src/rdk_robot_api/config/robot_params.yaml'
 
     if os.path.exists(config_path):
         try:

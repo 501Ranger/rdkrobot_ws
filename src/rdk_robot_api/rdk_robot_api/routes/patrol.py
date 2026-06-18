@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
+from typing import Optional
 from .. import ros_node as rn
 from ..models import CommandPayload, TaskPayload, SchedulePayload
+from ..log_manager import LogManager
 
 router = APIRouter(prefix="/api/v1/patrol", tags=["Patrol"])
 
@@ -14,8 +16,8 @@ def post_patrol_cmd(payload: CommandPayload):
         raise HTTPException(status_code=503, detail="ROS 2 node not initialized")
     
     cmd_lower = payload.cmd.lower()
-    if cmd_lower not in ["start", "pause", "stop", "resume"]:
-        raise HTTPException(status_code=400, detail="Invalid command. Allowed: start, pause, stop, resume")
+    if cmd_lower not in ["start", "start_once", "pause", "stop", "resume"]:
+        raise HTTPException(status_code=400, detail="Invalid command. Allowed: start, start_once, pause, stop, resume")
     
     rn.ros_node.publish_patrol_cmd(cmd_lower)
     return {"status": "success", "command_sent": cmd_lower}
@@ -58,3 +60,32 @@ def delete_patrol_schedule(schedule_id: str):
     if not success:
         raise HTTPException(status_code=404, detail=f"Schedule with ID {schedule_id} not found")
     return {"status": "success", "deleted_id": schedule_id}
+
+@router.get("/logs")
+def get_patrol_logs(type: Optional[str] = None, status: Optional[str] = None, limit: Optional[int] = None):
+    """获取所有导航/巡逻任务的历史日志，支持按类型和状态过滤"""
+    logs = LogManager.get_logs()
+    if type:
+        logs = [log for log in logs if log.get("type") == type]
+    if status:
+        logs = [log for log in logs if log.get("status") == status]
+    if limit is not None:
+        logs = logs[:limit]
+    return logs
+
+@router.delete("/logs")
+def clear_patrol_logs():
+    """清空所有导航与巡逻任务的历史日志"""
+    success = LogManager.clear_logs()
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to clear logs")
+    return {"status": "success"}
+
+@router.delete("/logs/{log_id}")
+def delete_patrol_log(log_id: str):
+    """删除单条指定的导航历史/任务日志"""
+    success = LogManager.delete_log(log_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Log with ID {log_id} not found")
+    return {"status": "success", "deleted_id": log_id}
+
